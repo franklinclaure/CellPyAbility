@@ -4,27 +4,18 @@ CellPyAbility is an open-source cell viability and dose-response analysis tool t
 
 ## Table of Contents
 - [Quick Start](#quick-start): minimal step-by-step guide for running CellPyAbility
-  - [CellProfiler](#cellprofiler): describes CellProfiler requirement
-  - [Installation (CLI)](#installation-cli): install CellPyAbility with pip or conda from the command line
-  - [Running an Analysis](#running-an-analysis-cli): analyze data with CellPyAbility from the command line
-  - [Windows Application](#windows-application): install CellPyAbility as a code-free GUI Windows executable and analyze data
-  - [Test Data](#test-data): download the test images and compare the results to the expected outputs
 
 - [Abstract](#abstract): overview of the method and software
 
 - [Requirements](#requirements): necessary steps before running the software
-
-  - [Data Requirements](#data-requirements): applies to all uses
-  - [Application Requirements](#application-requirements): applies to Windows application
 
 - [Command Line Interface](#command-line-interface-cli): modern CLI for automated workflows and testing
 
 - [Windows Application](#running-the-windows-application): code-free executable for Windows OS
 
 - [Example Outputs](#example-outputs): examples of figures and tables for each module
-  - [GDA Module](#gda-module): two cell lines, one drug gradient
-  - [Synergy Module](#synergy-module): one cell line, two drug gradients
-  - [Simple Module](#simple-module): nuclei count matrix
+
+- [Modifying the CellProfiler Pipeline](#modifying-the-cellprofiler-pipeline)
 
 - [Testing](#testing): automated tests and example data for validation
 
