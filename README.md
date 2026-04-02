@@ -61,7 +61,7 @@ cellpyability gda \
   --top-conc 0.000001 \
   --dilution 3 \
   --image-dir /path/to/your/images \
-  --output-dir /path/to/results # optional; saves to ./ by default
+  --output-dir /path/to/results # optional
 ```
 
 **Synergy**
@@ -75,7 +75,7 @@ cellpyability synergy \
   --y-top-conc 0.0001 \
   --y-dilution 4 \
   --image-dir /path/to/images \
-  --output-dir /path/to/results  # Optional; saves to ./ by default
+  --output-dir /path/to/results  # Optional
 ```
 
 For command information while in the CLI, run `cellpyability --help` or `cellpyability <module> --help`.
@@ -149,7 +149,7 @@ cellpyability gda \
   --top-conc 0.000001 \
   --dilution 3 \
   --image-dir /path/to/images \
-  --output-dir /path/to/results  # Optional; saves to ./ by default
+  --output-dir /path/to/results  # Optional
 ```
 
 **Parameters:**
@@ -183,7 +183,7 @@ cellpyability synergy \
   --y-top-conc 0.0001 \
   --y-dilution 4 \
   --image-dir /path/to/images \
-  --output-dir /path/to/results  # Optional; saves to ./ by default
+  --output-dir /path/to/results  # Optional
 ```
 
 **Parameters:**
@@ -207,7 +207,7 @@ Generate a nuclei count matrix without further analysis:
 cellpyability simple \
   --title "20250101_Counts" \
   --image-dir /path/to/images \
-  --output-dir /path/to/results  # Optional; saves to ./ by default
+  --output-dir /path/to/results  # Optional
 ```
 
 **Parameters:**
@@ -257,7 +257,7 @@ For synergy batch analysis:
 #!/bin/bash
 CONFIG_FILE=path/to/config.csv
 # Process multiple experiments using a CSV config file
-tail -n +2 "$CONFIG_FILE" | while IFS=, read -r dir title upper lower conc dil; do
+tail -n +2 "$CONFIG_FILE" | while IFS=, read -r dir title xdrug xconc xdil ydrug yconc ydil; do
     
     echo "Processing: $title in directory $dir..."
 
