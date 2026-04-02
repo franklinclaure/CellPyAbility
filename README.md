@@ -15,7 +15,7 @@ CellPyAbility is an open-source cell viability and dose-response analysis tool t
 
 - [Example Outputs](#example-outputs): examples of figures and tables for each module
 
-- [Modifying the CellProfiler Pipeline](#modifying-the-cellprofiler-pipeline)
+- [Modifying the CellProfiler Pipeline](#modifying-the-cellprofiler-pipeline): guidelines for custom CellProfiler analysis integration
 
 - [Testing](#testing): automated tests and example data for validation
 
