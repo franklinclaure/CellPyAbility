@@ -4,9 +4,11 @@ CellPyAbility is an open-source cell viability and dose-response analysis tool t
 
 ## Table of Contents
 - [Quick Start](#quick-start): minimal step-by-step guide for running CellPyAbility
-  - [PyPI Installation](#pypi-installation): install CellPyAbility with pip and run it with the command line (Python users)
-  - [Development Installation](#development-installation-for-contributors): clone the CellPyAbility repo and edit it (Python devs)
-  - [Windows Application](#windows-application): install CellPyAbility as a code-free GUI Windows executable
+  - [CellProfiler](#cellprofiler): describes CellProfiler requirement
+  - [Installation (CLI)](#installation-cli): install CellPyAbility with pip or conda from the command line
+  - [Running an Analysis](#running-an-analysis-cli): analyze data with CellPyAbility from the command line
+  - [Windows Application](#windows-application): install CellPyAbility as a code-free GUI Windows executable and analyze data
+  - [Test Data](#test-data): download the test images and compare the results to the expected outputs
 
 - [Abstract](#abstract): overview of the method and software
 
@@ -26,29 +28,41 @@ CellPyAbility is an open-source cell viability and dose-response analysis tool t
 
 - [Testing](#testing): automated tests and example data for validation
 
-- [Contributions](#contributions): who did what
+- [Contributing](#contributing): guidelines for development installation
+
+- [Acknowledgements](#acknowledgements): who did what
 
 ## Quick Start
-CellProfiler must be installed because CellPyAbility uses it as a subprocess. See [Requirements](#requirements) for more information.
+### CellProfiler
+CellProfiler must be installed because CellPyAbility uses it as a subprocess. 
 
-### PyPI Installation
-Install CellPyAbility from PyPI to use it as a command-line tool:
+CellPyAbility automatically searches default CellProfiler install locations based on your OS. If it cannot be found, you will be prompted to provide the path on your first run, which is then saved to cellprofiler_path.txt for future runs. 
 
+See [Requirements](#requirements) for more information.
+
+### Installation (CLI)
+Install CellPyAbility from PyPI or Bioconda. If using Bioconda, we recommend creating a dedicated environment:
+
+**PyPI**:
 ```bash
 # Install from PyPI
 pip install cellpyability
+```
 
-# Run analysis on your images
-# Outputs are saved to ./cellpyability_output/ by default
-cellpyability gda \
-  --title "MyExperiment" \
-  --upper-name "Cell Line A" \
-  --lower-name "Cell Line B" \
-  --top-conc 0.000001 \
-  --dilution 3 \
-  --image-dir /path/to/your/images
+**Bioconda**:
+```bash
+# Create a Conda environment and install CellPyAbility
+conda create --name cellpyability -c conda-forge -c bioconda cellpyability "python>=3.8,<=3.11"
 
-# Specify custom output location
+# Activate the new environment
+conda activate cellpyability
+```
+
+### Running an Analysis (CLI)
+
+**Growth Delay Assay (GDA)**
+```bash
+# Run a growth delay assay (GDA) analysis 
 cellpyability gda \
   --title "MyExperiment" \
   --upper-name "Cell Line A" \
@@ -56,86 +70,48 @@ cellpyability gda \
   --top-conc 0.000001 \
   --dilution 3 \
   --image-dir /path/to/your/images \
-  --output-dir /path/to/results
+  --output-dir /path/to/results # optional; saves to ./ by default
 ```
 
-**To download example data for testing:**
-- Download the [example GDA images](https://github.com/bindralab/CellPyAbility/tree/main/example/example_gda)
-- Run: `cellpyability gda --image-dir /path/to/example/example_gda ...`
-- Compare to [expected outputs](https://github.com/bindralab/CellPyAbility/tree/main/example/example_expected_outputs)
-
-### Development Installation (For Contributors)
-Clone the repository for development and access to example data:
-
+**Synergy**
 ```bash
-# Clone the repository
-git clone https://github.com/bindralab/CellPyAbility
-cd CellPyAbility
-
-# Install in editable mode
-pip install -e .
-
-# Download example data (requires Git LFS)
-git lfs pull
-
-# Run GDA analysis with example data
-cellpyability gda \
-  --title "MyExperiment" \
-  --upper-name "Cell Line A" \
-  --lower-name "Cell Line B" \
-  --top-conc 0.000001 \
-  --dilution 3 \
-  --image-dir example/example_gda
-
-# Or test without CellProfiler using pre-counted data
-cellpyability gda \
-  --title test \
-  --upper-name "Cell Line A" \
-  --lower-name "Cell Line B" \
-  --top-conc 0.000001 \
-  --dilution 3 \
-  --image-dir /tmp \
-  --counts-file tests/data/test_gda_counts.csv \
-  --no-plot
+cellpyability synergy \
+  --title "20250101_Synergy" \
+  --x-drug "Drug_A" \
+  --x-top-conc 0.0004 \
+  --x-dilution 4 \
+  --y-drug "Drug_B" \
+  --y-top-conc 0.0001 \
+  --y-dilution 4 \
+  --image-dir /path/to/images \
+  --output-dir /path/to/results  # Optional; saves to ./ by default
 ```
 
-For more CLI options, run `cellpyability --help` or `cellpyability gda --help`.
+For command information while in the CLI, run `cellpyability --help` or `cellpyability <module> --help`.
 
 ### Windows Application
 - Download the [Windows executable](windows_app/CellPyAbility.exe)
   - We recommend moving CellPyAbility.exe into an empty directory (running it will create files)
-- Download the [GDA test data](https://github.com/bindralab/CellPyAbility/tree/main/example/example_gda) from the repository
-- Run CellPyAbility.exe and select the GDA module from the menu
-- Run the test data and compare the results to the [expected output](https://github.com/bindralab/CellPyAbility/tree/main/example/example_expected_outputs)
+- Run CellPyAbility.exe and select the desired module from the menu
+- Enter the experiment info into the GUI
+
+### Test Data
+- Download the [example GDA images](https://github.com/bindralab/CellPyAbility/tree/main/example/example_gda)
+- Download the [example synergy images](https://github.com/bindralab/CellPyAbility/tree/main/example/example_synergy)
+- Compare outputs to [expected outputs](https://github.com/bindralab/CellPyAbility/tree/main/example/example_expected_outputs)
 
 ## Abstract
 
-CellPyAbility is an open-access software for the automated analysis of dose-response experiments (growth delay assays, or GDAs) via nuclei counting.
+Nuclei counting provides a low-cost, metabolic-independent alternative to ATP- or
+tetrazolium-based cell viability assays. However, the fragmentation of image processing, normalization, and statistical modeling across multiple software platforms hinders high-throughput adoption. 
 
-Nuclei counting provides several advantages over other common methods of measuring cell viability. Compared to the commonly used methylthiazol tetrazolium (MTT; reduction-based) or CellTiter-Glo (ATP-based) assays, GDAs: 
-- provide single-cell resolution of survival 
-
-- are insensitive to metabolic variability within a cell or between cell lines 
-
-- are compatible with redox-altering chemicals 
-
-- require simpler methodology and cheaper reagents
-
-- can be used on live cells using non-toxic nuclear dyes like Hoechst. 
-
-A disadvantage of the GDA is the computational and temporal cost of the required image analysis. CellPyAbility rapidly calculates dose-response metrics and publication-ready graphics from a folder of unedited, whole-well GDA images in approximately one minute on commodity hardware.
-
-CellPyAbility includes the synergy module which analyzes 59 unique drug concentration combinations, returning dose-response metrics and Bliss independence scores, a measure of synergy in cellular systems.
-
-Finally, the simple module returns a matrix of nuclei counts in a 96-well format without further analysis, allowing maximum flexibility.
-
-CellPyAbility uses [CellProfiler](https://cellprofiler.org/) to quantify nuclei, which maximizes modularity for the user. Please see the [CellProfiler license](CellProfilerLicense.txt).
+We present CellPyAbility, a Python-based suite that automates image processing, dose-response fitting, and synergy analysis. It converts unedited whole-well images into publication-ready graphics in under one minute per 96-well plate on standard desktop hardware.
 
 ## Requirements
 
 ### Data Requirements
 
-Reading the [protocols](protocol.pdf) first may aid in understanding the data requirements.
+Reading the [protocols](protocol.pdf) first may aid in understanding the default data requirements.
 
 - Only the inner 60 wells of a 96-well plate (B-G, 2-11) should be used
 
@@ -182,7 +158,7 @@ cellpyability gda \
   --top-conc 0.000001 \
   --dilution 3 \
   --image-dir /path/to/images \
-  --output-dir /path/to/results  # Optional: custom output location
+  --output-dir /path/to/results  # Optional; saves to ./ by default
 ```
 
 **Parameters:**
@@ -216,7 +192,7 @@ cellpyability synergy \
   --y-top-conc 0.0001 \
   --y-dilution 4 \
   --image-dir /path/to/images \
-  --output-dir /path/to/results  # Optional: custom output location
+  --output-dir /path/to/results  # Optional; saves to ./ by default
 ```
 
 **Parameters:**
@@ -240,7 +216,7 @@ Generate a nuclei count matrix without further analysis:
 cellpyability simple \
   --title "20250101_Counts" \
   --image-dir /path/to/images \
-  --output-dir /path/to/results  # Optional: custom output location
+  --output-dir /path/to/results  # Optional; saves to ./ by default
 ```
 
 **Parameters:**
@@ -469,15 +445,66 @@ This dual approach ensures both automated validation (for development/CI) and ma
 
 **Note:** We have not tested the analysis scripts on protocols other than those provided. For best results, please follow the provided [protocol](protocol.pdf).
 
-## Contributions
+## Contributing
+### Development Installation
+Clone the repository for development and access to example data:
+
+```bash
+# Clone the repository
+git clone https://github.com/bindralab/CellPyAbility
+cd CellPyAbility
+
+# Install in editable mode
+pip install -e .
+
+# Download example data (requires Git LFS)
+git lfs pull
+
+# Run GDA analysis with example data
+cellpyability gda \
+  --title "MyExperiment" \
+  --upper-name "Cell Line A" \
+  --lower-name "Cell Line B" \
+  --top-conc 0.000001 \
+  --dilution 3 \
+  --image-dir example/example_gda
+
+# Or test without CellProfiler using pre-counted data
+cellpyability gda \
+  --title test \
+  --upper-name "Cell Line A" \
+  --lower-name "Cell Line B" \
+  --top-conc 0.000001 \
+  --dilution 3 \
+  --image-dir /tmp \
+  --counts-file tests/data/test_gda_counts.csv \
+  --no-plot
+```
+
+### Reporting Issues
+If you encounter a bug or have a feature request, please open an issue on our [GitHub Issues](https://github.com/bindralab/CellPyAbility/issues) page. When reporting a bug, please include:
+- Operating system with version
+- Python and CellProfiler versions
+- Exact command ran
+- Full error traceback
+
+### Submitting a Pull Request
+We welcome community contributions! To submit a change:
+1. Fork the repository and create a new branch for your feature/fix (`git checkout -b feature/feature-name`)
+2. Ensure your code is readable and well-documented
+3. Run the automated test suite (`python tests/test_module_outputs.py`) to ensure all tests pass
+4. Commit your changes with a clear message and push them to your fork
+5. Open a Pull Request against our `main` branch
+
+## Acknowledgements
 Summary information regarding the authors:
-- My name is James Elia, and I am a PhD candidate in Yale's Pathology and Molecular Medicine program. I am the author of the repository.
+- James Elia (Yale Department of Pathology): lead developer and author.
 
-- Sam Friedman, MS is a Computational Research Support Analyst at Yale Center for Research Computing. He provided programming and software design mentorship.
+- Sam Friedman, MS (Yale Center for Research Computing): programming mentorship.
 
-- Ranjit Bindra, MD, PhD is the Harvey and Kate Cushing Professor of Therapeutic Radiology and Professor of Pathology at Yale School of Medicine. He provided scientific mentorship and publishing support for the repository.
+- Ranjit Bindra, MD, PhD (Yale Department of Therapeutic Radiology): scientific mentorship and principal investigator.
 
-- GitHub Copilot helped with automated testing and restructuring the repository for PyPI.
+- GitHub Copilot: assisted automated testing development and restructuring the repository for PyPI.
 
 ## Comments or Questions?
 Please contact me at james.elia@yale.edu
