@@ -61,7 +61,7 @@ cellpyability gda \
   --top-conc 0.000001 \
   --dilution 3 \
   --image-dir /path/to/your/images \
-  --output-dir /path/to/results # optional
+  --output-dir /path/to/results # Optional
 ```
 
 **Synergy**
