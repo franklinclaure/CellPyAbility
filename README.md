@@ -115,7 +115,7 @@ Reading the [protocols](protocol.pdf) first may aid in understanding the default
 - The synergy module requires a directory of 180 images
   - Wells of the same name (B2, ...) across three plates are triplicates
 
-### Application Requirements
+### Windows Application Requirements
 
 - The user must have CellProfiler (tested on version 4.2.5, though others may work)
   - [Windows 64-bit Version 4.2.5](https://cellprofiler-releases.s3.amazonaws.com/CellProfiler-Windows-4.2.5.exe)
