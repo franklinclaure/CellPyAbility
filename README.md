@@ -343,7 +343,7 @@ The GDA module outputs three tabular files with increasing degrees of analysis:
 
 Additionally, the script generates a plot with 5-parameter logistic curves:
 
-![GDA plot](example/example_expected_outputs/example_gda_plot.png)
+![GDA plot](example/example_expected_outputs/test_gda_plot.png)
 ### Synergy Module
 The synergy module outputs four tabular files:
 - [raw nuclei counts](example/example_expected_outputs/example_synergy_counts.csv)
@@ -356,7 +356,7 @@ The synergy module outputs four tabular files:
 
 Additionally, the script generates an interactive [3D surface map](example/example_expected_outputs/example_synergy_plot.html) in HTML with synergy as heat:
 
-![synergy plot](example/example_expected_outputs/example_synergy_plot_screenshot.png)
+![synergy plot](example/example_expected_outputs/test_synergy_plot_static.png)
 
 ### Simple Module
 Finally, the simple module outputs nuclei counts in a 96-well matrix format. This offers maximum flexibility but does not provide any analysis.
