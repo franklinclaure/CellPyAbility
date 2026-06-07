@@ -335,32 +335,32 @@ A log file with detailed logging is written to the directory. If the application
 ## Example Outputs
 ### GDA Module
 The GDA module outputs three tabular files with increasing degrees of analysis:
-- [raw nuclei counts](example/example_expected_outputs/example_gda_counts.csv)
+- [raw nuclei counts](example/example_expected_outputs/test_gda_counts.csv)
 
-- [normalized cell viability matrix](example/example_expected_outputs/example_gda_ViabilityMatrix.csv)
+- [normalized cell viability matrix](example/example_expected_outputs/test_gda_ViabilityMatrix.csv)
 
-- [cell viability statistics](example/example_expected_outputs/example_gda_Stats.csv)
+- [cell viability statistics](example/example_expected_outputs/test_gda_Stats.csv)
 
 Additionally, the script generates a plot with 5-parameter logistic curves:
 
 ![GDA plot](example/example_expected_outputs/test_gda_plot.png)
 ### Synergy Module
 The synergy module outputs four tabular files:
-- [raw nuclei counts](example/example_expected_outputs/example_synergy_counts.csv)
+- [raw nuclei counts](example/example_expected_outputs/test_synergy_counts.csv)
 
-- [normalized cell viability matrix](example/example_expected_outputs/example_synergy_ViabilityMatrix.csv)
+- [normalized cell viability matrix](example/example_expected_outputs/test_synergy_ViabilityMatrix.csv)
 
-- [cell viability statistics](example/example_expected_outputs/example_synergy_stats.csv)
+- [cell viability statistics](example/example_expected_outputs/test_synergy_stats.csv)
 
-- [Bliss synergy matrix](example/example_expected_outputs/example_synergy_BlissMatrix.csv)
+- [Bliss synergy matrix](example/example_expected_outputs/test_synergy_BlissMatrix.csv)
 
-Additionally, the script generates an interactive [3D surface map](example/example_expected_outputs/example_synergy_plot.html) in HTML with synergy as heat:
+Additionally, the script generates an interactive [3D surface map](example/example_expected_outputs/test_synergy_plot.html) in HTML with synergy as heat:
 
 ![synergy plot](example/example_expected_outputs/test_synergy_plot_static.png)
 
 ### Simple Module
 Finally, the simple module outputs nuclei counts in a 96-well matrix format. This offers maximum flexibility but does not provide any analysis.
-- [count matrix](example/example_expected_outputs/example_simple_CountMatrix.csv)
+- [count matrix](example/example_expected_outputs/test_simple_CountMatrix.csv)
 
 ## Modifying the CellProfiler Pipeline
 
