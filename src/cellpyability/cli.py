@@ -188,7 +188,7 @@ def create_parser():
         help='Run batch processing of multiple experiments from a CSV configuration file'
     )
     batch_parser.add_argument(
-        '-I', '--input-file',
+        '-i', '--input-file',
         required=True,
         type=str,
         help='Path to the batch configuration CSV file'

@@ -231,7 +231,7 @@ cellpyability batch --input-file path/to/config.csv --no-plot
 ```
 
 **Parameters:**
-- `-I, --input-file`: Path to the batch configuration CSV file
+- `-i, --input-file`: Path to the batch configuration CSV file
 - `-n, --no-plot`: (Optional) Skip displaying plots (still saves them)
 - `-o, --output-dir`: (Optional) Custom output directory
 
