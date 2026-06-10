@@ -22,7 +22,7 @@ def create_parser():
     )
     
     parser.add_argument(
-        '--version',
+        '-v', '--version',
         action='version',
         version=f'%(prog)s {__version__}'
     )
@@ -40,50 +40,50 @@ def create_parser():
         help='Growth Delay Assay: dose-response analysis of two cell lines (B-D, E-G) and one treatment (2-11)'
     )
     gda_parser.add_argument(
-        '--title',
+        '-t', '--title',
         required=True,
         help='Title of the experiment (e.g., 20250101_CellLine_Drug)'
     )
     gda_parser.add_argument(
-        '--upper-name',
+        '-u', '--upper-name',
         required=True,
         help='Name for upper cell condition (rows B-D)'
     )
     gda_parser.add_argument(
-        '--lower-name',
+        '-l', '--lower-name',
         required=True,
         help='Name for lower cell condition (rows E-G)'
     )
     gda_parser.add_argument(
-        '--top-conc',
+        '-c', '--top-conc',
         type=float,
         required=True,
         help='Top concentration in molar (e.g., 0.000001 for 1 µM)'
     )
     gda_parser.add_argument(
-        '--dilution',
+        '-d', '--dilution',
         type=float,
         required=True,
         help='Dilution factor between columns (e.g., 3 for 3-fold dilution)'
     )
     gda_parser.add_argument(
-        '--image-dir',
+        '-i', '--image-dir',
         required=True,
         type=str,
         help='Directory containing the 60 well images'
     )
     gda_parser.add_argument(
-        '--no-plot',
+        '-n', '--no-plot',
         action='store_true',
         help='Skip displaying the plot (still saves it)'
     )
     gda_parser.add_argument(
-        '--counts-file',
+        '-f', '--counts-file',
         type=str,
         help='Path to pre-existing counts CSV file (for testing, bypasses CellProfiler)'
     )
     gda_parser.add_argument(
-        '--output-dir',
+        '-o', '--output-dir',
         type=str,
         help='Custom output directory (default: ./cellpyability_output/ in current working directory)'
     )
@@ -94,62 +94,62 @@ def create_parser():
         help='Synergy analysis: dose response analysis for one cell line and two treatments (row gradient and column gradient)'
     )
     synergy_parser.add_argument(
-        '--title',
+        '-t', '--title',
         required=True,
         help='Title of the experiment'
     )
     synergy_parser.add_argument(
-        '--x-drug',
+        '-x', '--x-drug',
         required=True,
         help='Drug name for horizontal gradient (increases along row)'
     )
     synergy_parser.add_argument(
-        '--x-top-conc',
+        '-c', '--x-top-conc',
         type=float,
         required=True,
         help='Horizontal top concentration in molar'
     )
     synergy_parser.add_argument(
-        '--x-dilution',
+        '-d', '--x-dilution',
         type=float,
         required=True,
         help='Horizontal dilution factor'
     )
     synergy_parser.add_argument(
-        '--y-drug',
+        '-y', '--y-drug',
         required=True,
         help='Drug name for vertical gradient (increases along column)'
     )
     synergy_parser.add_argument(
-        '--y-top-conc',
+        '-C', '--y-top-conc',
         type=float,
         required=True,
         help='Vertical top concentration in molar'
     )
     synergy_parser.add_argument(
-        '--y-dilution',
+        '-D', '--y-dilution',
         type=float,
         required=True,
         help='Vertical dilution factor'
     )
     synergy_parser.add_argument(
-        '--image-dir',
+        '-i', '--image-dir',
         required=True,
         type=str,
         help='Directory containing the 180 well images'
     )
     synergy_parser.add_argument(
-        '--no-plot',
+        '-n', '--no-plot',
         action='store_true',
         help='Skip displaying the plot (still saves it)'
     )
     synergy_parser.add_argument(
-        '--counts-file',
+        '-f', '--counts-file',
         type=str,
         help='Path to pre-existing counts CSV file (for testing, bypasses CellProfiler)'
     )
     synergy_parser.add_argument(
-        '--output-dir',
+        '-o', '--output-dir',
         type=str,
         help='Custom output directory (default: ./cellpyability_output/ in current working directory)'
     )
@@ -160,23 +160,23 @@ def create_parser():
         help='Simple nuclei counting: 96-well count matrix without analysis'
     )
     simple_parser.add_argument(
-        '--title',
+        '-t', '--title',
         required=True,
         help='Title of the experiment'
     )
     simple_parser.add_argument(
-        '--image-dir',
+        '-i', '--image-dir',
         required=True,
         type=str,
         help='Directory containing the well images'
     )
     simple_parser.add_argument(
-        '--counts-file',
+        '-f', '--counts-file',
         type=str,
         help='Path to pre-existing counts CSV file (for testing, bypasses CellProfiler)'
     )
     simple_parser.add_argument(
-        '--output-dir',
+        '-o', '--output-dir',
         type=str,
         help='Custom output directory (default: ./cellpyability_output/ in current working directory)'
     )
