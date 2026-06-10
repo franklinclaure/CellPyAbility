@@ -59,10 +59,10 @@ def establish_base():
 
     if not base_dir.exists():
         logger.critical(f'Base directory {base_dir} does not exist.')
-        exit(1)
+        raise RuntimeError(f'Base directory {base_dir} does not exist.')
     elif not os.access(base_dir, os.W_OK):
         logger.critical(f'Base directory {base_dir} is not writable.')
-        exit(1)
+        raise RuntimeError(f'Base directory {base_dir} is not writable.')
 
     logger.info(f'Base directory {base_dir} established ...')
     return base_dir
@@ -154,76 +154,36 @@ def get_cellprofiler_path():
 # Define cp_path
 cp_path = get_cellprofiler_path()
 
-def dose_range_x(dose_max, dilution):
-    dose_array = [dose_max]
-    for i in range(8):
-        dose_max /= (dilution)
-        dose_array.insert(0, dose_max)
-    logger.debug('Concentration gradient array created.')
-    return dose_array
 
-def dose_range_y(dose_max, dilution):
-    dose_array = [dose_max]
-    for i in range(4):
-        dose_max /= (dilution)
-        dose_array.insert(0, dose_max)
-    logger.debug('Concentration gradient array created.')
-    return dose_array
-
-# Runs CellProfiler from the command line with the path to the image directory as a parameter
-# When ready to run, write 'df_cp = run_cellprofiler()'
-def run_cellprofiler(image_dir):
-    ## Define the path to the pipeline (.cppipe)
-    cppipe_path = Path(sys._MEIPASS) / 'CellPyAbility.cppipe'
-
-    ## Define the folder where CellProfiler will output the .csv results
-    cp_output_dir = base_dir / 'cp_output'
-    cp_output_dir.mkdir(exist_ok=True)
-    logger.debug('CellPyAbility/cp_output/ identified or created and identified.')
-
-    # Run CellProfiler from the command line
-    logger.debug('Starting CellProfiler from command line ...')
-    subprocess.run([cp_path, '-c', '-r', '-p', cppipe_path, '-i', image_dir, '-o', cp_output_dir])
-    logger.info('CellProfiler nuclei counting complete.')
-
-    # Define the path to the CellProfiler counting output
-    cp_csv = cp_output_dir / 'CellPyAbilityImage.csv'
-    if cp_csv.exists():
-        logger.debug('CellPyAbilityImage.csv exists in /cp_output/ ...')
+def get_pipeline_path():
+    """Get CellProfiler pipeline path, supporting frozen and script modes."""
+    if getattr(sys, 'frozen', False):
+        meipass_dir = getattr(sys, '_MEIPASS', None)
+        if meipass_dir is None:
+            raise RuntimeError(
+                'Internal error: PyInstaller frozen mode detected but sys._MEIPASS attribute '
+                'is missing. This should not occur in properly built executables.'
+            )
+        pipeline_path = Path(meipass_dir) / 'CellPyAbility.cppipe'
     else:
-        logger.critical('CellProfiler output CellPyAbilityImage.csv does not exist in /cp_output/')
-        logger.info('If CellPyAbility.cppipe is modified, make sure the output is still named CellPyAbilityImage.csv')
-        exit(1)
+        pipeline_path = Path(__file__).resolve().parent / 'CellPyAbility.cppipe'
+    if not pipeline_path.exists():
+        raise RuntimeError(f'CellPyAbility.cppipe not found at {pipeline_path}')
+    return pipeline_path.resolve()
 
-    # Load the CellProfiler counts into a DataFrame
-    df_cp = pd.read_csv(cp_csv)
-    
-    return df_cp, cp_csv
 
-# Names of the inner 60 wells of a 96-well plate
-wells = [
-    'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B9', 'B10', 'B11',
-    'C2', 'C3', 'C4', 'C5', 'C6', 'C7', 'C8', 'C9', 'C10', 'C11',
-    'D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8', 'D9', 'D10', 'D11',
-    'E2', 'E3', 'E4', 'E5', 'E6', 'E7', 'E8', 'E9', 'E10', 'E11',
-    'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11',
-    'G2', 'G3', 'G4', 'G5', 'G6', 'G7', 'G8', 'G9', 'G10', 'G11',
-    ]
+def get_output_base_dir():
+    """Get writable output root for GUI runs."""
+    output_base = base_dir / 'cellpyability_output'
+    output_base.mkdir(parents=True, exist_ok=True)
+    return output_base.resolve()
 
-def rename_wells(tiff_name, wells):
-    for well in wells:
-        if well in tiff_name:
-            return well
-    logger.debug('Well names extracted from file names.')
-    return tiff_name  # Keep original if no target matches
 
-def rename_counts(cp_csv, counts_csv):
-    try:
-        os.rename(cp_csv, counts_csv)
-        logger.debug(f'{cp_csv} succesfully renamed to {counts_csv}')
-    except FileNotFoundError:
-        logger.debug(f'{cp_csv} not found')
-    except PermissionError:
-        logger.debug(f'Permission denied. {cp_csv} may be open or in use.')
-    except Exception as e:
-        logger.debug(f'While renaming {cp_csv}, an error occurred: {e}')
+def configure_cli_backend():
+    """
+    Configure environment so shared CLI backend behaves correctly in GUI/PyInstaller context.
+    """
+    os.environ['CELLPYABILITY_PIPELINE_PATH'] = str(get_pipeline_path())
+    os.environ['CELLPYABILITY_CONFIG_DIR'] = str(base_dir.resolve())
+    os.environ['CELLPYABILITY_CP_PATH'] = str(Path(get_cellprofiler_path()).resolve())
+    return get_output_base_dir()
