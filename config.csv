@@ -1,2 +1,3 @@
-dir,title,upper,lower,conc,dil
-path/to/image_dir/,20260101_CellLineA_DrugX,Cell Line A,Cell Line B,0.000001,3
+module,dir,title,upper,lower,conc,dil,xdrug,xconc,xdil,ydrug,yconc,ydil
+gda,example/example_gda,20260101_GDA,Cell Line A,Cell Line B,0.000001,3,,,,,,
+synergy,example/example_synergy,20260101_Synergy,,,,,Drug_A,0.0004,4,Drug_B,0.0001,4

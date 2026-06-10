@@ -117,8 +117,8 @@ Reading the [protocols](protocol.pdf) first may aid in understanding the default
 
 ### Windows Application Requirements
 
-- The user must have CellProfiler (tested on version 4.2.5, though others may work)
-  - [Windows 64-bit Version 4.2.5](https://cellprofiler-releases.s3.amazonaws.com/CellProfiler-Windows-4.2.5.exe)
+- The user must have CellProfiler (tested on versions 4.2.5-4.2.8, though others may work)
+  - [Windows 64-bit Version 4.2.8](https://cellprofiler-releases.s3.amazonaws.com/CellProfiler-Windows-4.2.8.exe)
 
 - The user must have Windows OS.
 
@@ -153,15 +153,15 @@ cellpyability gda \
 ```
 
 **Parameters:**
-- `--title`: Experiment title (used for output file names)
-- `--upper-name`: Name for cell condition in rows B-D
-- `--lower-name`: Name for cell condition in rows E-G
-- `--top-conc`: Top drug concentration in molar (e.g., 0.000001 for 1 µM)
-- `--dilution`: Dilution factor between columns (e.g., 3 for 3-fold dilution)
-- `--image-dir`: Directory containing 60 well images
-- `--no-plot`: (Optional) Skip displaying plot window
-- `--counts-file`: (Optional) Use pre-existing counts CSV for testing
-- `--output-dir`: (Optional) Custom output directory (default: `./cellpyability_output/`)
+- `-t, --title`: Experiment title (used for output file names)
+- `-u, --upper-name`: Name for cell condition in rows B-D
+- `-l, --lower-name`: Name for cell condition in rows E-G
+- `-c, --top-conc`: Top drug concentration in molar (e.g., 0.000001 for 1 µM)
+- `-d, --dilution`: Dilution factor between columns (e.g., 3 for 3-fold dilution)
+- `-i, --image-dir`: Directory containing 60 well images
+- `-n, --no-plot`: (Optional) Skip displaying plot window
+- `-f, --counts-file`: (Optional) Use pre-existing counts CSV for testing
+- `-o, --output-dir`: (Optional) Custom output directory (default: `./cellpyability_output/`)
 
 **Outputs** (saved to `./cellpyability_output/gda_output/` by default):
 - `{title}_gda_Stats.csv`: Dose-response statistics
@@ -187,17 +187,17 @@ cellpyability synergy \
 ```
 
 **Parameters:**
-- `--title`: Experiment title
-- `--x-drug`: Name of horizontal gradient drug
-- `--x-top-conc`: Horizontal top concentration in molar
-- `--x-dilution`: Horizontal dilution factor
-- `--y-drug`: Name of vertical gradient drug
-- `--y-top-conc`: Vertical top concentration in molar
-- `--y-dilution`: Vertical dilution factor
-- `--image-dir`: Directory containing images
-- `--no-plot`: (Optional) Skip displaying plot
-- `--counts-file`: (Optional) Use pre-existing counts CSV
-- `--output-dir`: (Optional) Custom output directory (default: `./cellpyability_output/`)
+- `-t, --title`: Experiment title
+- `-x, --x-drug`: Name of horizontal gradient drug
+- `-c, --x-top-conc`: Horizontal top concentration in molar
+- `-d, --x-dilution`: Horizontal dilution factor
+- `-y, --y-drug`: Name of vertical gradient drug
+- `-C, --y-top-conc`: Vertical top concentration in molar
+- `-D, --y-dilution`: Vertical dilution factor
+- `-i, --image-dir`: Directory containing images
+- `-n, --no-plot`: (Optional) Skip displaying plot
+- `-f, --counts-file`: (Optional) Use pre-existing counts CSV
+- `-o, --output-dir`: (Optional) Custom output directory (default: `./cellpyability_output/`)
 
 ### Simple Module
 
@@ -211,73 +211,50 @@ cellpyability simple \
 ```
 
 **Parameters:**
-- `--title`: Experiment title
-- `--image-dir`: Directory containing well images
-- `--counts-file`: (Optional) Use pre-existing CellProfiler counts CSV
-- `--output-dir`: (Optional) Custom output directory (default: `./cellpyability_output/`)
+- `-t, --title`: Experiment title
+- `-i, --image-dir`: Directory containing well images
+- `-f, --counts-file`: (Optional) Use pre-existing CellProfiler counts CSV
+- `-o, --output-dir`: (Optional) Custom output directory (default: `./cellpyability_output/`)
 
 **Outputs** (saved to `./cellpyability_output/simple_output/` by default):
 - `{title}_simple_CountMatrix.csv`: 96-well nuclei count matrix
 
-### Batch Processing Examples
+### Batch Module
 
-The CLI enables automated batch processing with shell scripts. 
+The batch module enables automated processing of multiple experiments from a single CSV configuration file. It acts as a job manager, automatically detecting whether a row requires GDA or Synergy analysis.
 
 [config.csv file template](config.csv)
 
-For GDA batch analysis:
-
 ```bash
-#!/bin/bash
-CONFIG_FILE=path/to/config.csv
 # Process multiple experiments using a CSV config file
-tail -n +2 "$CONFIG_FILE" | while IFS=, read -r dir title upper lower conc dil; do
-    
-    echo "Processing: $title in directory $dir..."
-
-    if [ -d "$dir" ]; then
-        cellpyability gda \
-            --title "$title" \
-            --upper-name "$upper" \
-            --lower-name "$lower" \
-            --top-conc "$conc" \
-            --dilution "$dil" \
-            --image-dir "$dir" \
-            --no-plot
-    else
-        echo "Warning: Directory $dir not found. Skipping."
-    fi
-
-done
+cellpyability batch --input-file path/to/config.csv --no-plot
 ```
 
-For synergy batch analysis:
+**Parameters:**
+- `-I, --input-file`: Path to the batch configuration CSV file
+- `-n, --no-plot`: (Optional) Skip displaying plots (still saves them)
+- `-o, --output-dir`: (Optional) Custom output directory
 
-```bash
-#!/bin/bash
-CONFIG_FILE=path/to/config.csv
-# Process multiple experiments using a CSV config file
-tail -n +2 "$CONFIG_FILE" | while IFS=, read -r dir title xdrug xconc xdil ydrug yconc ydil; do
-    
-    echo "Processing: $title in directory $dir..."
+**Config CSV Schema:**
+The configuration file should contain a `module` column to specify the analysis type (`gda` or `synergy`), followed by the required parameters for that module.
 
-    if [ -d "$dir" ]; then
-        cellpyability synergy \
-            --title "$title" \
-            --x-drug "$xdrug" \
-            --x-top-conc "$xconc" \
-            --x-dilution "$xdil" \
-            --y-drug "$ydrug" \
-            --y-top-conc "$yconc" \
-            --y-dilution "$ydil" \
-            --image-dir "$dir" \
-            --no-plot
-    else
-        echo "Warning: Directory $dir not found. Skipping."
-    fi
+| Column | Description |
+| --- | --- |
+| `module` | `gda` or `synergy` |
+| `dir` | Directory containing images |
+| `title` | Experiment title |
+| `upper` | (GDA) Name for cell condition in rows B-D |
+| `lower` | (GDA) Name for cell condition in rows E-G |
+| `conc` | (GDA) Top drug concentration in molar |
+| `dil` | (GDA) Dilution factor |
+| `xdrug` | (Synergy) Name of horizontal gradient drug |
+| `xconc` | (Synergy) Horizontal top concentration |
+| `xdil` | (Synergy) Horizontal dilution factor |
+| `ydrug` | (Synergy) Name of vertical gradient drug |
+| `yconc` | (Synergy) Vertical top concentration |
+| `ydil` | (Synergy) Vertical dilution factor |
 
-done
-```
+Note: You can leave columns blank if they do not apply to the specific module for that row.
 
 ### Output Locations
 

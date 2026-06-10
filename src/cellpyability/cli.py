@@ -8,6 +8,7 @@ This module provides CLI commands to run the three main modules:
 """
 
 import argparse
+import csv
 import sys
 
 from ._version import __version__
@@ -181,6 +182,28 @@ def create_parser():
         help='Custom output directory (default: ./cellpyability_output/ in current working directory)'
     )
     
+    # Batch module parser
+    batch_parser = subparsers.add_parser(
+        'batch',
+        help='Run batch processing of multiple experiments from a CSV configuration file'
+    )
+    batch_parser.add_argument(
+        '-I', '--input-file',
+        required=True,
+        type=str,
+        help='Path to the batch configuration CSV file'
+    )
+    batch_parser.add_argument(
+        '-n', '--no-plot',
+        action='store_true',
+        help='Skip displaying the plots (still saves them)'
+    )
+    batch_parser.add_argument(
+        '-o', '--output-dir',
+        type=str,
+        help='Custom output directory'
+    )
+    
     return parser
 
 
@@ -233,6 +256,60 @@ def run_simple(args):
     )
 
 
+def run_batch(args):
+    """Run batch processing from a CSV file."""
+    from cellpyability import gda_analysis, synergy_analysis
+    
+    output_dir = getattr(args, 'output_dir', None)
+    no_plot = getattr(args, 'no_plot', False)
+    
+    try:
+        with open(args.input_file, 'r', encoding='utf-8-sig') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                module = row.get('module', '').strip().lower()
+                title = row.get('title')
+                image_dir = row.get('dir') or row.get('image_dir')
+                
+                if not module:
+                    print(f"Skipping row with no module specified: {row}")
+                    continue
+                
+                if module == 'gda':
+                    print(f"\n--- Running GDA: {title} ---")
+                    gda_analysis.run_gda(
+                        title_name=title,
+                        upper_name=row.get('upper') or row.get('upper_name'),
+                        lower_name=row.get('lower') or row.get('lower_name'),
+                        top_conc=float(row.get('conc') or row.get('top_conc')),
+                        dilution=float(row.get('dil') or row.get('dilution')),
+                        image_dir=image_dir,
+                        show_plot=not no_plot,
+                        output_dir=output_dir
+                    )
+                elif module == 'synergy':
+                    print(f"\n--- Running Synergy: {title} ---")
+                    synergy_analysis.run_synergy(
+                        title_name=title,
+                        x_drug=row.get('xdrug') or row.get('x_drug'),
+                        x_top_conc=float(row.get('xconc') or row.get('x_top_conc')),
+                        x_dilution=float(row.get('xdil') or row.get('x_dilution')),
+                        y_drug=row.get('ydrug') or row.get('y_drug'),
+                        y_top_conc=float(row.get('yconc') or row.get('y_top_conc')),
+                        y_dilution=float(row.get('ydil') or row.get('y_dilution')),
+                        image_dir=image_dir,
+                        show_plot=not no_plot,
+                        output_dir=output_dir
+                    )
+                else:
+                    print(f"Unknown module '{module}' in row: {row}")
+                    
+    except FileNotFoundError:
+        raise CellPyAbilityError(f"Batch input file not found: {args.input_file}")
+    except Exception as e:
+        raise CellPyAbilityError(f"Error during batch processing: {e}")
+
+
 def main():
     """Main entry point for the CLI."""
     parser = create_parser()
@@ -245,6 +322,8 @@ def main():
             run_synergy(args)
         elif args.module == 'simple':
             run_simple(args)
+        elif args.module == 'batch':
+            run_batch(args)
         else:
             parser.print_help()
             sys.exit(1)
