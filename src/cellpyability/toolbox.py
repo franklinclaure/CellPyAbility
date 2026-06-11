@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pandas as pd
@@ -15,11 +16,33 @@ import numpy as np
 from scipy.optimize import curve_fit
 import shutil
 
+
+class CellPyAbilityError(Exception):
+    """Base exception for CellPyAbility."""
+
+
+class ConfigurationError(CellPyAbilityError):
+    """Raised when required configuration is missing or invalid."""
+
+
+class InputValidationError(CellPyAbilityError):
+    """Raised when user-provided inputs are invalid."""
+
+
+class CellProfilerExecutionError(CellPyAbilityError):
+    """Raised when CellProfiler subprocess execution fails."""
+
+
+class DataValidationError(CellPyAbilityError):
+    """Raised when expected data format/columns are not present."""
+
 def cellpyability_logger():
     """
     Creates and configures the CellPyAbility logger.
     
-    Logs all messages (DEBUG and above) to cellpyability.log in current working directory.
+    Logs all messages (DEBUG and above) to cellpyability.log.
+    In frozen mode (Windows .exe), logs to the directory containing the executable.
+    In script mode, logs to the current working directory.
     Logs INFO and above to console output.
     
     Returns:
@@ -34,10 +57,24 @@ def cellpyability_logger():
     if logger.hasHandlers():
         return logger
 
-    # Create a cellpyability.log file in current working directory (PyPI-compatible)
-    log_file = Path.cwd() / "cellpyability.log"
-    fh = logging.FileHandler(log_file)
-    fh.setLevel(logging.DEBUG)
+    # Determine log file path
+    if getattr(sys, 'frozen', False):
+        # Bundled executable - log in the same directory as the .exe
+        log_dir = Path(sys.executable).resolve().parent
+    else:
+        # Script mode - log in current working directory
+        log_dir = Path.cwd()
+        
+    log_file = log_dir / "cellpyability.log"
+    
+    try:
+        fh = logging.FileHandler(log_file)
+        fh.setLevel(logging.DEBUG)
+    except (PermissionError, IOError):
+        # Fallback to current working directory if executable dir is not writable
+        log_file = Path.cwd() / "cellpyability.log"
+        fh = logging.FileHandler(log_file)
+        fh.setLevel(logging.DEBUG)
 
     # Only log >= INFO messages in the terminal
     ch = logging.StreamHandler()
@@ -52,7 +89,7 @@ def cellpyability_logger():
     logger.addHandler(fh)
     logger.addHandler(ch)
 
-    logger.debug('Logger setup complete.')
+    logger.debug(f'Logger setup complete. Logging to: {log_file}')
     return logger
 
 # Define logger so it can be referenced in later functions
@@ -66,7 +103,7 @@ def establish_base():
     
     if not base_dir.exists():
         logger.critical(f'Package directory {base_dir} does not exist.')
-        exit(1)
+        raise ConfigurationError(f'Package directory {base_dir} does not exist.')
     
     logger.info(f'Package directory {base_dir} established ...')
     return base_dir
@@ -97,7 +134,7 @@ def get_output_base_dir(output_dir=None):
     # Verify it's writable
     if not os.access(output_base, os.W_OK):
         logger.critical(f'Output directory {output_base} is not writable.')
-        exit(1)
+        raise ConfigurationError(f'Output directory {output_base} is not writable.')
     
     logger.info(f'Output directory {output_base} established ...')
     return output_base
@@ -121,11 +158,43 @@ def prompt_path():
     """
     Prompt user to enter the CellProfiler executable path.
     
+    In GUI/frozen mode, uses a tkinter file dialog.
+    In CLI mode, uses a terminal prompt.
+    
     Returns:
     --------
     str
         User-provided path with quotes and whitespace stripped
     """
+    if getattr(sys, 'frozen', False):
+        import tkinter as tk
+        from tkinter import filedialog, simpledialog
+        
+        # Create a hidden root window
+        root = tk.Tk()
+        root.withdraw()
+        logger.debug('Hidden tkinter window created for path prompt')
+
+        # Prompt the user to pick the CellProfiler executable via a file dialog
+        path = filedialog.askopenfilename(
+            title="Select your CellProfiler executable",
+            filetypes=[("Executables", "*.exe" if os.name == "nt" else "*"), ("All files", "*.*")]
+        )
+
+        # If they hit “Cancel” (empty string), fall back to a simple text prompt
+        if not path:
+            path = simpledialog.askstring(
+                title="Enter CellProfiler Path",
+                prompt="Could not pick a file. Please type the full path to CellProfiler:"
+            )
+
+        root.destroy()
+        if path:
+            return path.strip().strip('"').strip("'")
+        else:
+            logger.critical('No CellProfiler path provided in GUI prompt')
+            raise ConfigurationError('No path provided for CellProfiler executable')
+
     return input("Enter the path to the CellProfiler program: ").strip().strip('"').strip("'")
 
 def get_cellprofiler_path():
@@ -141,8 +210,19 @@ def get_cellprofiler_path():
     str or Path
         Path to the CellProfiler executable
     """
-    # Store CellProfiler path in current working directory
-    config_file = Path.cwd() / "cellprofiler_path.txt"
+    env_cp_path = os.getenv("CELLPYABILITY_CP_PATH")
+    if env_cp_path:
+        env_cp_path = Path(env_cp_path).expanduser().resolve()
+        if env_cp_path.exists():
+            logger.debug(f"Using CellProfiler path from CELLPYABILITY_CP_PATH: {env_cp_path}")
+            return str(env_cp_path)
+        raise ConfigurationError(
+            f"CELLPYABILITY_CP_PATH is set but does not exist: {env_cp_path}"
+        )
+
+    config_dir = Path(os.getenv("CELLPYABILITY_CONFIG_DIR", str(Path.cwd()))).expanduser().resolve()
+    config_dir.mkdir(parents=True, exist_ok=True)
+    config_file = config_dir / "cellprofiler_path.txt"
 
     if config_file.exists():
         with open(config_file, "r") as file:
@@ -214,6 +294,13 @@ def gen_dose_range(dose_max: float, dilution: float, num_doses: int) -> np.ndarr
     -----------
     dose_array : NumPy array
     """
+    if dose_max <= 0:
+        raise InputValidationError("Top concentration must be greater than 0.")
+    if dilution <= 1:
+        raise InputValidationError("Dilution factor must be greater than 1.")
+    if num_doses < 1:
+        raise InputValidationError("Number of doses must be at least 1.")
+
     # Calculate lowest dose directly to avoid accumulating error from float division
     dose_min = dose_max / (dilution ** (num_doses-1))
 
@@ -256,19 +343,22 @@ def run_cellprofiler(image_dir, counts_file=None, output_dir=None):
         counts_path = Path(counts_file).resolve()
         if not counts_path.exists():
             logger.critical(f'Counts file {counts_file} does not exist.')
-            exit(1)
+            raise InputValidationError(f'Counts file {counts_file} does not exist.')
         logger.info(f'Using pre-existing counts file: {counts_file}')
         df_cp = pd.read_csv(counts_path)
         return df_cp, counts_path
     
     # Define the path to the CellProfiler pipeline (.cppipe) in the package directory
-    cppipe_path = base_dir / 'CellPyAbility.cppipe'
+    pipeline_env = os.getenv("CELLPYABILITY_PIPELINE_PATH")
+    cppipe_path = Path(pipeline_env).expanduser().resolve() if pipeline_env else (base_dir / 'CellPyAbility.cppipe')
     if cppipe_path.exists():
         logger.debug('CellProfiler pipeline exists in package directory ...')
     else:
         logger.critical('CellProfiler pipeline CellPyAbility.cppipe not found in package directory.')
         logger.info('If you are using a different pipeline, make sure it is named CellPyAbility.cppipe and is in the package directory.')
-        exit(1)
+        raise ConfigurationError(
+            f'CellProfiler pipeline CellPyAbility.cppipe not found: {cppipe_path}'
+        )
 
     ## Define the folder where CellProfiler will output the .csv results
     # Use the output directory structure for writable files
@@ -283,11 +373,17 @@ def run_cellprofiler(image_dir, counts_file=None, output_dir=None):
     
     if not image_path_obj.exists():
         logger.critical(f"Image directory does not exist: {image_path_obj}")
-        exit(1)
+        raise InputValidationError(f"Image directory does not exist: {image_path_obj}")
         
     # We also ensure the pipeline path and output dir are absolute resolved paths
     cppipe_path_obj = cppipe_path.resolve()
     cp_output_obj = cp_output_dir.resolve()
+    cp_csv = cp_output_dir / 'CellPyAbilityImage.csv'
+
+    # Prevent stale output reuse across failed runs
+    if cp_csv.exists():
+        cp_csv.unlink()
+        logger.debug(f'Removed existing stale CellProfiler output: {cp_csv}')
 
     # Run CellProfiler from the command line
     logger.debug('Starting CellProfiler from command line ...')
@@ -295,23 +391,37 @@ def run_cellprofiler(image_dir, counts_file=None, output_dir=None):
     
     # We explicitly convert paths to str() here
     # Subprocess command receives clean string paths formatted for host OS
-    subprocess.run([
-        cp_exe, 
-        '-c', '-r', 
-        '-p', str(cppipe_path_obj), 
-        '-i', str(image_path_obj), 
+    command = [
+        cp_exe,
+        '-c', '-r',
+        '-p', str(cppipe_path_obj),
+        '-i', str(image_path_obj),
         '-o', str(cp_output_obj)
-    ])
+    ]
+    try:
+        subprocess.run(command, check=True, capture_output=True, text=True, timeout=3600)
+    except subprocess.TimeoutExpired as e:
+        logger.error('CellProfiler execution timed out.')
+        raise CellProfilerExecutionError('CellProfiler timed out after 3600 seconds.') from e
+    except subprocess.CalledProcessError as e:
+        logger.error(f'CellProfiler execution failed with return code {e.returncode}.')
+        stderr = (e.stderr or "").strip()
+        stdout = (e.stdout or "").strip()
+        details = stderr if stderr else stdout
+        raise CellProfilerExecutionError(
+            f"CellProfiler failed (exit code {e.returncode}). {details}".strip()
+        ) from e
     logger.info('CellProfiler nuclei counting complete.')
 
     # Define the path to the CellProfiler counting output
-    cp_csv = cp_output_dir / 'CellPyAbilityImage.csv'
     if cp_csv.exists():
         logger.debug('CellPyAbilityImage.csv exists in /cp_output/ ...')
     else:
         logger.critical('CellProfiler output CellPyAbilityImage.csv does not exist in /cp_output/')
         logger.info('If CellPyAbility.cppipe is modified, make sure the output is still named CellPyAbilityImage.csv')
-        exit(1)
+        raise CellProfilerExecutionError(
+            'CellProfiler completed but expected output CellPyAbilityImage.csv was not created.'
+        )
 
     # Load the CellProfiler counts into a DataFrame
     df_cp = pd.read_csv(cp_csv)
@@ -332,6 +442,78 @@ def rename_wells(tiff_name):
         return f"{row}{col}"
         
     return tiff_name
+
+
+def standardize_counts_dataframe(df_cp):
+    """
+    Standardize CellProfiler counts data to ['nuclei', 'well'].
+    
+    Verifies that the required data is present and attempts to map various
+    possible CellProfiler output column names to a standard format.
+    
+    Raises:
+    -------
+    DataValidationError
+        If the required columns cannot be found or the dataframe is empty.
+    """
+    if df_cp.empty:
+        raise DataValidationError("The provided counts data is empty.")
+
+    columns = list(df_cp.columns)
+    
+    # If already standardized, return a copy of the required columns
+    if {'nuclei', 'well'}.issubset(columns):
+        return df_cp[['nuclei', 'well']].copy()
+
+    # Identify count column
+    count_candidates = ['Count_Nuclei', 'count_nuclei', 'Nuclei', 'nuclei']
+    count_col = next((c for c in count_candidates if c in columns), None)
+    
+    # Identify well/filename column
+    well_candidates = ['FileName_DAPI', 'FileName_DNA', 'FileName', 'well']
+    well_col = next((c for c in well_candidates if c in columns), None)
+
+    # Heuristics for missing columns
+    if count_col is None or well_col is None:
+        non_image_cols = [c for c in columns if c != 'ImageNumber']
+        
+        # Inference for count column
+        if count_col is None:
+            numeric_cols = [
+                c for c in non_image_cols if pd.api.types.is_numeric_dtype(df_cp[c])
+            ]
+            if numeric_cols:
+                count_col = numeric_cols[0]
+                logger.warning(
+                    f"Count column not found by name. Inferred '{count_col}' as nuclei count column."
+                )
+
+        # Inference for well column
+        if well_col is None:
+            remaining = [c for c in non_image_cols if c != count_col]
+            if remaining:
+                well_col = remaining[0]
+                logger.warning(
+                    f"Well/FileName column not found by name. Inferred '{well_col}' as well identifier."
+                )
+
+    if count_col is None or well_col is None:
+        raise DataValidationError(
+            f"Could not identify required columns in counts file. Found: {columns}. "
+            "Expected columns like 'Count_Nuclei' and 'FileName_DAPI'."
+        )
+
+    # Standardize and copy
+    standardized = df_cp[[count_col, well_col]].copy()
+    standardized.columns = ['nuclei', 'well']
+
+    # Final validation of contents
+    if standardized['nuclei'].isna().any():
+        raise DataValidationError('Nuclei count column contains missing values.')
+    if standardized['well'].isna().any():
+        raise DataValidationError('Well identifier column contains missing values.')
+
+    return standardized
 
 def rename_counts(cp_csv, counts_csv):
     """
@@ -461,7 +643,7 @@ def fit_response_curve(x, y, name):
              # Hill parameter index 1 is EC50
              ic50 = popt[1] 
              return x_plot, hill(x_plot, *popt), ic50
-        except:
+        except (RuntimeError, ValueError, ArithmeticError, OverflowError):
              logger.warning(f"Could not fit {name}. Returning connect-the-dots")
              # Return straight lines between points if fit fails
              return x, y, np.nan

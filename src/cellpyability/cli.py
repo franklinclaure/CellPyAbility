@@ -6,11 +6,15 @@ This module provides CLI commands to run the three main modules:
 - synergy: drug combination synergy analysis
 - simple: nuclei count matrix
 - plate-map: interactive plate map CSV builder
+- batch: batch processing from a CSV configuration file
 """
 
 import argparse
+import csv
 import sys
-from pathlib import Path
+
+from ._version import __version__
+from .toolbox import CellPyAbilityError
 
 
 def create_parser():
@@ -21,9 +25,9 @@ def create_parser():
     )
     
     parser.add_argument(
-        '--version',
+        '-v', '--version',
         action='version',
-        version='%(prog)s 0.1.0'
+        version=f'%(prog)s {__version__}'
     )
     
     subparsers = parser.add_subparsers(
@@ -39,48 +43,48 @@ def create_parser():
         help='Growth Delay Assay: dose-response analysis of two cell lines (B-D, E-G) and one treatment (2-11)'
     )
     gda_parser.add_argument(
-        '--title',
+        '-t', '--title',
         required=True,
         help='Title of the experiment (e.g., 20250101_CellLine_Drug)'
     )
     gda_parser.add_argument(
-        '--upper-name',
+        '-u', '--upper-name',
         help='Name for upper cell condition (rows B-D); required unless --plate-map is provided'
     )
     gda_parser.add_argument(
-        '--lower-name',
+        '-l', '--lower-name',
         help='Name for lower cell condition (rows E-G); required unless --plate-map is provided'
     )
     gda_parser.add_argument(
-        '--top-conc',
+        '-c', '--top-conc',
         type=float,
         required=True,
         help='Top concentration in molar (e.g., 0.000001 for 1 µM)'
     )
     gda_parser.add_argument(
-        '--dilution',
+        '-d', '--dilution',
         type=float,
         required=True,
         help='Dilution factor between columns (e.g., 3 for 3-fold dilution)'
     )
     gda_parser.add_argument(
-        '--image-dir',
+        '-i', '--image-dir',
         required=True,
         type=str,
         help='Directory containing the 60 well images'
     )
     gda_parser.add_argument(
-        '--no-plot',
+        '-n', '--no-plot',
         action='store_true',
         help='Skip displaying the plot (still saves it)'
     )
     gda_parser.add_argument(
-        '--counts-file',
+        '-f', '--counts-file',
         type=str,
         help='Path to pre-existing counts CSV file (for testing, bypasses CellProfiler)'
     )
     gda_parser.add_argument(
-        '--output-dir',
+        '-o', '--output-dir',
         type=str,
         help='Custom output directory (default: ./cellpyability_output/ in current working directory)'
     )
@@ -96,62 +100,62 @@ def create_parser():
         help='Synergy analysis: dose response analysis for one cell line and two treatments (row gradient and column gradient)'
     )
     synergy_parser.add_argument(
-        '--title',
+        '-t', '--title',
         required=True,
         help='Title of the experiment'
     )
     synergy_parser.add_argument(
-        '--x-drug',
+        '-x', '--x-drug',
         required=True,
         help='Drug name for horizontal gradient (increases along row)'
     )
     synergy_parser.add_argument(
-        '--x-top-conc',
+        '-c', '--x-top-conc',
         type=float,
         required=True,
         help='Horizontal top concentration in molar'
     )
     synergy_parser.add_argument(
-        '--x-dilution',
+        '-d', '--x-dilution',
         type=float,
         required=True,
         help='Horizontal dilution factor'
     )
     synergy_parser.add_argument(
-        '--y-drug',
+        '-y', '--y-drug',
         required=True,
         help='Drug name for vertical gradient (increases along column)'
     )
     synergy_parser.add_argument(
-        '--y-top-conc',
+        '-C', '--y-top-conc',
         type=float,
         required=True,
         help='Vertical top concentration in molar'
     )
     synergy_parser.add_argument(
-        '--y-dilution',
+        '-D', '--y-dilution',
         type=float,
         required=True,
         help='Vertical dilution factor'
     )
     synergy_parser.add_argument(
-        '--image-dir',
+        '-i', '--image-dir',
         required=True,
         type=str,
         help='Directory containing the 180 well images'
     )
     synergy_parser.add_argument(
-        '--no-plot',
+        '-n', '--no-plot',
         action='store_true',
         help='Skip displaying the plot (still saves it)'
     )
     synergy_parser.add_argument(
-        '--counts-file',
+        '-f', '--counts-file',
         type=str,
         help='Path to pre-existing counts CSV file (for testing, bypasses CellProfiler)'
     )
     synergy_parser.add_argument(
-        '--output-dir',
+        '-o', '--output-dir',
         type=str,
         help='Custom output directory (default: ./cellpyability_output/ in current working directory)'
     )
@@ -162,23 +166,23 @@ def create_parser():
         help='Simple nuclei counting: 96-well count matrix without analysis'
     )
     simple_parser.add_argument(
-        '--title',
+        '-t', '--title',
         required=True,
         help='Title of the experiment'
     )
     simple_parser.add_argument(
-        '--image-dir',
+        '-i', '--image-dir',
         required=True,
         type=str,
         help='Directory containing the well images'
     )
     simple_parser.add_argument(
-        '--counts-file',
+        '-f', '--counts-file',
         type=str,
         help='Path to pre-existing counts CSV file (for testing, bypasses CellProfiler)'
     )
     simple_parser.add_argument(
-        '--output-dir',
+        '-o', '--output-dir',
         type=str,
         help='Custom output directory (default: ./cellpyability_output/ in current working directory)'
     )
@@ -204,6 +208,28 @@ def create_parser():
         help='Validate an existing plate map CSV and exit'
     )
     
+    # Batch module parser
+    batch_parser = subparsers.add_parser(
+        'batch',
+        help='Run batch processing of multiple experiments from a CSV configuration file'
+    )
+    batch_parser.add_argument(
+        '-i', '--input-file',
+        required=True,
+        type=str,
+        help='Path to the batch configuration CSV file'
+    )
+    batch_parser.add_argument(
+        '-n', '--no-plot',
+        action='store_true',
+        help='Skip displaying the plots (still saves them)'
+    )
+    batch_parser.add_argument(
+        '-o', '--output-dir',
+        type=str,
+        help='Custom output directory'
+    )
+
     return parser
 
 
@@ -214,7 +240,7 @@ def run_gda(args):
 
     if not getattr(args, 'plate_map', None) and (not args.upper_name or not args.lower_name):
         raise ValueError("--upper-name and --lower-name are required unless --plate-map is provided")
-    
+
     gda_analysis.run_gda(
         title_name=args.title,
         upper_name=args.upper_name,
@@ -232,7 +258,7 @@ def run_gda(args):
 def run_synergy(args):
     """Run the synergy module with CLI arguments."""
     from cellpyability import synergy_analysis
-    
+
     synergy_analysis.run_synergy(
         title_name=args.title,
         x_drug=args.x_drug,
@@ -251,7 +277,7 @@ def run_synergy(args):
 def run_simple(args):
     """Run the simple module with CLI arguments."""
     from cellpyability import simple_analysis
-    
+
     simple_analysis.run_simple(
         title=args.title,
         image_dir=args.image_dir,
@@ -279,6 +305,61 @@ def run_plate_map(args):
     interactive_map.launch_plate_map_gui(output_csv=args.output)
 
 
+def run_batch(args):
+    """Run batch processing from a CSV file."""
+    from cellpyability import gda_analysis, synergy_analysis
+
+    output_dir = getattr(args, 'output_dir', None)
+    no_plot = getattr(args, 'no_plot', False)
+
+    try:
+        with open(args.input_file, 'r', encoding='utf-8-sig') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                module = row.get('module', '').strip().lower()
+                title = row.get('title')
+                image_dir = row.get('dir') or row.get('image_dir')
+
+                if not module:
+                    print(f"Skipping row with no module specified: {row}")
+                    continue
+
+                if module == 'gda':
+                    print(f"\n--- Running GDA: {title} ---")
+                    gda_analysis.run_gda(
+                        title_name=title,
+                        upper_name=row.get('upper') or row.get('upper_name'),
+                        lower_name=row.get('lower') or row.get('lower_name'),
+                        top_conc=float(row.get('conc') or row.get('top_conc')),
+                        dilution=float(row.get('dil') or row.get('dilution')),
+                        image_dir=image_dir,
+                        show_plot=not no_plot,
+                        output_dir=output_dir,
+                        plate_map_file=row.get('plate_map') or row.get('plate_map_file') or None
+                    )
+                elif module == 'synergy':
+                    print(f"\n--- Running Synergy: {title} ---")
+                    synergy_analysis.run_synergy(
+                        title_name=title,
+                        x_drug=row.get('xdrug') or row.get('x_drug'),
+                        x_top_conc=float(row.get('xconc') or row.get('x_top_conc')),
+                        x_dilution=float(row.get('xdil') or row.get('x_dilution')),
+                        y_drug=row.get('ydrug') or row.get('y_drug'),
+                        y_top_conc=float(row.get('yconc') or row.get('y_top_conc')),
+                        y_dilution=float(row.get('ydil') or row.get('y_dilution')),
+                        image_dir=image_dir,
+                        show_plot=not no_plot,
+                        output_dir=output_dir
+                    )
+                else:
+                    print(f"Unknown module '{module}' in row: {row}")
+
+    except FileNotFoundError:
+        raise CellPyAbilityError(f"Batch input file not found: {args.input_file}")
+    except Exception as e:
+        raise CellPyAbilityError(f"Error during batch processing: {e}")
+
+
 def main():
     """Main entry point for the CLI."""
     parser = create_parser()
@@ -293,9 +374,14 @@ def main():
             run_simple(args)
         elif args.module == 'plate-map':
             run_plate_map(args)
+        elif args.module == 'batch':
+            run_batch(args)
         else:
             parser.print_help()
             sys.exit(1)
+    except CellPyAbilityError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
