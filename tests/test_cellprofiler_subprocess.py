@@ -21,8 +21,7 @@ class TestCellProfilerSubprocess(unittest.TestCase):
     @patch('cellpyability.toolbox._ensure_cellprofiler_path')
     @patch('cellpyability.toolbox.subprocess.run')
     @patch('cellpyability.toolbox.pd.read_csv')
-    @patch('cellpyability.toolbox.exit')  # Prevent exit() from terminating the test
-    def test_cellprofiler_subprocess_command_structure(self, mock_exit, mock_read_csv, mock_subprocess_run, mock_cp_path):
+    def test_cellprofiler_subprocess_command_structure(self, mock_read_csv, mock_subprocess_run, mock_cp_path):
         """
         Test that the CellProfiler subprocess call uses the correct command structure.
         
@@ -105,8 +104,7 @@ class TestCellProfilerSubprocess(unittest.TestCase):
     @patch('cellpyability.toolbox._ensure_cellprofiler_path')
     @patch('cellpyability.toolbox.subprocess.run')
     @patch('cellpyability.toolbox.pd.read_csv')
-    @patch('cellpyability.toolbox.exit')  # Prevent exit() from terminating the test
-    def test_cellprofiler_has_required_flags(self, mock_exit, mock_read_csv, mock_subprocess_run, mock_cp_path):
+    def test_cellprofiler_has_required_flags(self, mock_read_csv, mock_subprocess_run, mock_cp_path):
         """
         Test that all required CellProfiler flags are present.
         

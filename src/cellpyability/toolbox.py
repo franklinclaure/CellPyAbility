@@ -95,21 +95,37 @@ def cellpyability_logger():
 # Define logger so it can be referenced in later functions
 logger = cellpyability_logger()
 
-# Establishes the base directory for package resources (read-only)
-# Use get_output_base_dir() for writable output directories
+# Establishes the base directory for persistent configuration (writable)
 def establish_base():
-    """Get the package installation directory (for reading resources like .cppipe files)."""
-    base_dir = Path(__file__).resolve().parent
+    """
+    Get the base directory for configuration and persistent state.
+    In frozen mode (Windows .exe), this is the directory containing the executable.
+    In script mode, this is the package directory.
+    """
+    if getattr(sys, 'frozen', False):
+        # Bundled executable - use the directory containing the .exe
+        return Path(sys.executable).resolve().parent
     
-    if not base_dir.exists():
-        logger.critical(f'Package directory {base_dir} does not exist.')
-        raise ConfigurationError(f'Package directory {base_dir} does not exist.')
-    
-    logger.info(f'Package directory {base_dir} established ...')
-    return base_dir
+    # Script mode - use the package directory
+    return Path(__file__).resolve().parent
 
-# Define base_dir for package resources (pipeline files, etc.)
+# Define base_dir for configuration files (cellprofiler_path.txt, etc.)
 base_dir = establish_base()
+
+def get_resource_path(relative_path):
+    """
+    Get the absolute path to a package resource.
+    Supports both development (script) mode and frozen (PyInstaller) mode.
+    """
+    if getattr(sys, 'frozen', False):
+        # PyInstaller extraction folder
+        base_path = Path(getattr(sys, '_MEIPASS', sys.executable))
+    else:
+        # Package source directory
+        base_path = Path(__file__).resolve().parent
+        
+    resource_path = base_path / relative_path
+    return resource_path.resolve()
 
 def get_output_base_dir(output_dir=None):
     """
@@ -350,14 +366,18 @@ def run_cellprofiler(image_dir, counts_file=None, output_dir=None):
     
     # Define the path to the CellProfiler pipeline (.cppipe) in the package directory
     pipeline_env = os.getenv("CELLPYABILITY_PIPELINE_PATH")
-    cppipe_path = Path(pipeline_env).expanduser().resolve() if pipeline_env else (base_dir / 'CellPyAbility.cppipe')
-    if cppipe_path.exists():
-        logger.debug('CellProfiler pipeline exists in package directory ...')
+    if pipeline_env:
+        cppipe_path = Path(pipeline_env).expanduser().resolve()
     else:
-        logger.critical('CellProfiler pipeline CellPyAbility.cppipe not found in package directory.')
-        logger.info('If you are using a different pipeline, make sure it is named CellPyAbility.cppipe and is in the package directory.')
+        # Use helper to find it in bundle or package
+        cppipe_path = get_resource_path('CellPyAbility.cppipe')
+
+    if cppipe_path.exists():
+        logger.debug(f'CellProfiler pipeline found at: {cppipe_path}')
+    else:
+        logger.critical(f'CellProfiler pipeline not found: {cppipe_path}')
         raise ConfigurationError(
-            f'CellProfiler pipeline CellPyAbility.cppipe not found: {cppipe_path}'
+            f'CellProfiler pipeline CellPyAbility.cppipe not found at {cppipe_path}'
         )
 
     ## Define the folder where CellProfiler will output the .csv results
