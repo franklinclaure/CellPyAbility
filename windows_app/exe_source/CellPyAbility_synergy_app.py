@@ -72,7 +72,7 @@ def run():
         y_top_conc=float(gui_inputs['y_top_conc']),
         y_dilution=float(gui_inputs['y_dilution']),
         image_dir=gui_inputs['image_dir'],
-        show_plot=False,
+        show_plot=True,
         output_dir=str(output_base)
     )
 

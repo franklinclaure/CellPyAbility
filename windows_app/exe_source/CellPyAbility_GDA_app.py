@@ -65,7 +65,7 @@ def run():
         top_conc=float(gui_inputs['top_conc']),
         dilution=float(gui_inputs['dilution']),
         image_dir=gui_inputs['image_dir'],
-        show_plot=False,
+        show_plot=True,
         output_dir=str(output_base)
     )
 
