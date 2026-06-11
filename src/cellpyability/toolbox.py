@@ -418,19 +418,64 @@ def run_cellprofiler(image_dir, counts_file=None, output_dir=None):
         '-i', str(image_path_obj),
         '-o', str(cp_output_obj)
     ]
+    
+    # Pre-calculate total images for progress bar
+    image_extensions = {'.tif', '.tiff', '.png', '.jpg', '.jpeg'}
+    total_images = sum(1 for f in image_path_obj.iterdir() if f.suffix.lower() in image_extensions)
+    if total_images == 0:
+        logger.warning(f"No image files found in {image_path_obj}. CellProfiler may not have anything to process.")
+        total_images = 1 # Prevent division by zero if it runs anyway
+
+    logger.info("Starting image analysis. This may take a moment...")
+    
     try:
-        subprocess.run(command, check=True, capture_output=True, text=True, timeout=3600)
-    except subprocess.TimeoutExpired as e:
-        logger.error('CellProfiler execution timed out.')
-        raise CellProfilerExecutionError('CellProfiler timed out after 3600 seconds.') from e
-    except subprocess.CalledProcessError as e:
-        logger.error(f'CellProfiler execution failed with return code {e.returncode}.')
-        stderr = (e.stderr or "").strip()
-        stdout = (e.stdout or "").strip()
-        details = stderr if stderr else stdout
-        raise CellProfilerExecutionError(
-            f"CellProfiler failed (exit code {e.returncode}). {details}".strip()
-        ) from e
+        # Use Popen to stream output live
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            universal_newlines=True
+        )
+        
+        last_reported_image = 0
+        
+        for line in process.stdout:
+            # Look for lines like "Thu Jun 11 15:11:12 2026: Image # 1, module Images # 1"
+            match = re.search(r"Image\s+#\s+(\d+),\s+module", line)
+            if match:
+                current = int(match.group(1))
+                
+                # Only update the progress bar if we've moved to a new image
+                if current > last_reported_image:
+                    last_reported_image = current
+                    # Calculate progress
+                    percent = int(100 * current / total_images)
+                    bar_length = 30
+                    filled = int(bar_length * current / total_images)
+                    bar = '█' * filled + '-' * (bar_length - filled)
+                    # Use carriage return \r to stay on the same line
+                    sys.stdout.write(f'\rCellProfiler Progress: |{bar}| {percent}% ({current}/{total_images})')
+                    sys.stdout.flush()
+        
+        # Move to the next line after the progress bar finishes
+        if last_reported_image > 0:
+            sys.stdout.write('\n')
+            
+        process.wait()
+        if process.returncode != 0:
+            logger.error(f'CellProfiler execution failed with return code {process.returncode}.')
+            raise CellProfilerExecutionError(
+                f"CellProfiler failed (exit code {process.returncode}). Please check the console output for details."
+            )
+            
+    except Exception as e:
+        if not isinstance(e, CellProfilerExecutionError):
+            logger.error(f"Failed to run CellProfiler: {e}")
+            raise CellProfilerExecutionError("Failed to run CellProfiler.") from e
+        raise
+
     logger.info('CellProfiler nuclei counting complete.')
 
     # Define the path to the CellProfiler counting output
