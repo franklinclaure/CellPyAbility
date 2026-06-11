@@ -135,6 +135,7 @@ cellpyability --help          # Show available modules
 cellpyability gda --help      # Show GDA module options
 cellpyability synergy --help  # Show synergy module options  
 cellpyability simple --help   # Show simple module options
+cellpyability plate-map --help # Create or validate reusable plate map CSVs
 ```
 
 ### GDA Module
@@ -149,19 +150,21 @@ cellpyability gda \
   --top-conc 0.000001 \
   --dilution 3 \
   --image-dir /path/to/images \
+  --plate-map /path/to/plate_map.csv \
   --output-dir /path/to/results  # Optional
 ```
 
 **Parameters:**
 - `--title`: Experiment title (used for output file names)
-- `--upper-name`: Name for cell condition in rows B-D
-- `--lower-name`: Name for cell condition in rows E-G
+- `--upper-name`: Name for cell condition in rows B-D (required unless `--plate-map` is provided)
+- `--lower-name`: Name for cell condition in rows E-G (required unless `--plate-map` is provided)
 - `--top-conc`: Top drug concentration in molar (e.g., 0.000001 for 1 µM)
 - `--dilution`: Dilution factor between columns (e.g., 3 for 3-fold dilution)
 - `--image-dir`: Directory containing 60 well images
 - `--no-plot`: (Optional) Skip displaying plot window
 - `--counts-file`: (Optional) Use pre-existing counts CSV for testing
 - `--output-dir`: (Optional) Custom output directory (default: `./cellpyability_output/`)
+- `--plate-map`: (Optional) Use a reusable plate map CSV for custom genotype, vehicle, gradient, and technical replicate assignments
 
 **Outputs** (saved to `./cellpyability_output/gda_output/` by default):
 - `{title}_gda_Stats.csv`: Dose-response statistics
@@ -218,6 +221,40 @@ cellpyability simple \
 
 **Outputs** (saved to `./cellpyability_output/simple_output/` by default):
 - `{title}_simple_CountMatrix.csv`: 96-well nuclei count matrix
+
+### Plate Map Builder
+
+Create a reusable CSV describing the inner 60 wells before analysis:
+
+```bash
+# Open the graphical plate-map editor
+cellpyability plate-map --output my_plate_map.csv
+
+# Or create a CSV matching the current default GDA layout
+cellpyability plate-map --default --output default_gda_plate_map.csv
+
+# Validate a plate map before using it in a workflow
+cellpyability plate-map --validate my_plate_map.csv
+```
+
+The editor shows the inner 60 wells as a 6x10 grid (rows B-G, columns 2-11). Users can drag-select wells and assign:
+- genotype or cell line
+- vehicle controls
+- drug gradients
+- gradient axis (`horizontal` or `vertical`)
+- technical replicate grouping
+
+Plate map CSVs contain one row per well with these columns:
+- `well`, `row`, `column`: well identity
+- `genotype`: genotype, cell line, or cell condition
+- `treatment_type`: `vehicle` or `drug_gradient`
+- `drug`: drug or treatment name
+- `gradient_id`: label for a specific gradient
+- `gradient_axis`: `horizontal` or `vertical`
+- `concentration_index`: zero for vehicle; increasing dose index for gradients
+- `replicate_group`, `replicate_index`: technical replicate metadata
+- `is_vehicle`: true/false vehicle marker
+- `notes`: optional user notes
 
 ### Batch Processing Examples
 

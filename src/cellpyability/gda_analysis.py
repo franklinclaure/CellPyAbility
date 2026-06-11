@@ -13,7 +13,7 @@ from . import toolbox as tb
 logger, base_dir = tb.logger, tb.base_dir
 
 
-def run_gda(title_name, upper_name, lower_name, top_conc, dilution, image_dir, show_plot=True, counts_file=None, output_dir=None):
+def run_gda(title_name, upper_name, lower_name, top_conc, dilution, image_dir, show_plot=True, counts_file=None, output_dir=None, plate_map_file=None):
     """
     Run GDA (Growth Delay Assay) analysis for two cell lines (B-D, E-G) and one drug gradient (2-11).
     
@@ -37,6 +37,10 @@ def run_gda(title_name, upper_name, lower_name, top_conc, dilution, image_dir, s
         Path to pre-existing counts CSV file (for testing)
     output_dir : str, optional
         Custom output directory. If None, uses current working directory.
+    plate_map_file : str, optional
+        Path to a CellPyAbility plate map CSV. If provided, genotype, vehicle,
+        gradient, and technical replicate metadata are read from the map instead
+        of using the historical rows B-D / E-G and columns 2-11 assumptions.
     """
     
     # Create a concentration range array
@@ -56,6 +60,18 @@ def run_gda(title_name, upper_name, lower_name, top_conc, dilution, image_dir, s
     # Extract row/column designators for pivoting
     df_cp[['Row','Column']] = df_cp['well'].str.extract(r'^([B-G])(\d+)$')
     logger.debug('Extracted Row and Column from well names.')
+
+    if plate_map_file is not None:
+        return _run_gda_from_plate_map(
+            title_name=title_name,
+            top_conc=top_conc,
+            dilution=dilution,
+            df_cp=df_cp,
+            cp_csv=cp_csv,
+            plate_map_file=plate_map_file,
+            show_plot=show_plot,
+            output_dir=output_dir,
+        )
     
     # Pivot nuclei counts into a matrix for fast group stats
     count_matrix = df_cp.pivot(index='Row', columns='Column', values='nuclei')
@@ -201,3 +217,125 @@ def run_gda(title_name, upper_name, lower_name, top_conc, dilution, image_dir, s
     
     tb.rename_counts(cp_csv, counts_csv)
     logger.info(f'{title_name} raw counts saved to {gda_output_dir}.')
+
+
+def _run_gda_from_plate_map(title_name, top_conc, dilution, df_cp, cp_csv, plate_map_file, show_plot=True, output_dir=None):
+    """Run GDA analysis using an explicit plate map CSV."""
+    from . import interactive_map
+
+    plate_map = interactive_map.load_plate_map(plate_map_file)
+    plate_map['well'] = plate_map['well'].astype(str)
+    plate_map['column'] = plate_map['column'].astype(int)
+    plate_map['is_vehicle'] = plate_map['is_vehicle'].astype(bool)
+
+    df = df_cp.merge(plate_map, on='well', how='left', validate='many_to_one')
+    if df[interactive_map.PLATE_MAP_COLUMNS].isna().all(axis=1).any():
+        missing_wells = df.loc[df['genotype'].isna(), 'well'].tolist()
+        raise ValueError(f'Counts contain wells not present in plate map: {missing_wells}')
+
+    if not (df['treatment_type'] == 'vehicle').any():
+        raise ValueError('Plate map must include at least one vehicle well.')
+
+    gradient_rows = df[df['treatment_type'] == 'drug_gradient'].copy()
+    if gradient_rows.empty:
+        raise ValueError('Plate map must include at least one drug_gradient well for GDA analysis.')
+
+    max_index = int(gradient_rows['concentration_index'].astype(int).max())
+    doses = tb.gen_dose_range(top_conc, dilution, max_index)
+    dose_lookup = {0: 0.0}
+    dose_lookup.update({idx: dose for idx, dose in enumerate(doses, start=1)})
+    df['concentration_index'] = df['concentration_index'].fillna('').replace('', 0).astype(int)
+    df['Drug Concentration'] = df['concentration_index'].map(dose_lookup)
+
+    vehicle_means = (
+        df[df['treatment_type'] == 'vehicle']
+        .groupby('genotype')['nuclei']
+        .mean()
+    )
+    missing_vehicle = sorted(set(df['genotype']) - set(vehicle_means.index))
+    if missing_vehicle:
+        raise ValueError(f'Each genotype needs a vehicle control. Missing: {", ".join(missing_vehicle)}')
+
+    df['normalized_nuclei'] = df['nuclei'] / df['genotype'].map(vehicle_means)
+
+    output_base = tb.get_output_base_dir(output_dir)
+    gda_output_dir = output_base / 'gda_output'
+    gda_output_dir.mkdir(exist_ok=True)
+
+    grouped = (
+        df.groupby(['genotype', 'drug', 'gradient_id', 'gradient_axis', 'concentration_index', 'Drug Concentration'], dropna=False)
+        .agg(
+            Mean=('nuclei', 'mean'),
+            Standard_Deviation=('nuclei', 'std'),
+            Normalized_Mean=('normalized_nuclei', 'mean'),
+            Relative_Standard_Deviation=('normalized_nuclei', 'std'),
+            Wells=('well', lambda wells: ';'.join(sorted(wells))),
+            N=('well', 'count'),
+        )
+        .reset_index()
+        .sort_values(['genotype', 'concentration_index'])
+    )
+    grouped = grouped.rename(columns={
+        'genotype': 'Genotype',
+        'drug': 'Drug',
+        'gradient_id': 'Gradient ID',
+        'gradient_axis': 'Gradient Axis',
+        'concentration_index': 'Concentration Index',
+        'Standard_Deviation': 'Standard Deviation',
+        'Normalized_Mean': 'Normalized Mean',
+        'Relative_Standard_Deviation': 'Relative Standard Deviation',
+    })
+    grouped.to_csv(gda_output_dir / f'{title_name}_gda_Stats.csv', index=False)
+
+    viability_matrix = df[
+        [
+            'well',
+            'row',
+            'column',
+            'genotype',
+            'treatment_type',
+            'drug',
+            'gradient_id',
+            'gradient_axis',
+            'concentration_index',
+            'Drug Concentration',
+            'replicate_group',
+            'replicate_index',
+            'nuclei',
+            'normalized_nuclei',
+        ]
+    ].sort_values(['row', 'column'])
+    viability_matrix.to_csv(gda_output_dir / f'{title_name}_gda_ViabilityMatrix.csv', index=False)
+
+    plt.style.use('default')
+    for genotype, genotype_stats in grouped.groupby('Genotype'):
+        genotype_stats = genotype_stats[genotype_stats['Concentration Index'] > 0]
+        if genotype_stats.empty:
+            continue
+        x = genotype_stats['Drug Concentration'].astype(float).to_numpy()
+        y = genotype_stats['Normalized Mean'].astype(float).to_numpy()
+        yerr = genotype_stats['Relative Standard Deviation'].astype(float).to_numpy()
+        try:
+            x_fit, y_fit, ic50 = tb.fit_response_curve(x, y, genotype)
+            plt.plot(x_fit, y_fit, label=f'{genotype} fit')
+            plt.text(0.05, 0.08 + (0.04 * len(plt.gca().texts)), f'{genotype} IC50 = {ic50:.2e}', transform=plt.gca().transAxes)
+        except Exception as exc:
+            logger.warning(f'Could not fit {genotype}: {exc}')
+        plt.scatter(x, y, label=str(genotype))
+        plt.errorbar(x, y, yerr=yerr, fmt='none', capsize=3)
+
+    plt.xscale('log')
+    plt.xlabel('Concentration (M)')
+    plt.ylabel('Relative Cell Survival')
+    plt.title(str(title_name))
+    plt.legend()
+    plt.savefig(gda_output_dir / f'{title_name}_gda_plot.png', dpi=200, bbox_inches='tight')
+
+    if show_plot:
+        plt.show()
+    else:
+        plt.close()
+
+    counts_csv = gda_output_dir / f'{title_name}_gda_counts.csv'
+    tb.rename_counts(cp_csv, counts_csv)
+    logger.info(f'{title_name} plate-map GDA outputs saved to {gda_output_dir}.')

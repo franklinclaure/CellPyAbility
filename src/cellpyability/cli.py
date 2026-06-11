@@ -5,6 +5,7 @@ This module provides CLI commands to run the three main modules:
 - gda: dose-response analysis
 - synergy: drug combination synergy analysis
 - simple: nuclei count matrix
+- plate-map: interactive plate map CSV builder
 """
 
 import argparse
@@ -44,13 +45,11 @@ def create_parser():
     )
     gda_parser.add_argument(
         '--upper-name',
-        required=True,
-        help='Name for upper cell condition (rows B-D)'
+        help='Name for upper cell condition (rows B-D); required unless --plate-map is provided'
     )
     gda_parser.add_argument(
         '--lower-name',
-        required=True,
-        help='Name for lower cell condition (rows E-G)'
+        help='Name for lower cell condition (rows E-G); required unless --plate-map is provided'
     )
     gda_parser.add_argument(
         '--top-conc',
@@ -84,6 +83,11 @@ def create_parser():
         '--output-dir',
         type=str,
         help='Custom output directory (default: ./cellpyability_output/ in current working directory)'
+    )
+    gda_parser.add_argument(
+        '--plate-map',
+        type=str,
+        help='Optional CellPyAbility plate map CSV for custom genotype, vehicle, gradient, and replicate assignments'
     )
     
     # Synergy module parser
@@ -178,6 +182,27 @@ def create_parser():
         type=str,
         help='Custom output directory (default: ./cellpyability_output/ in current working directory)'
     )
+
+    # Plate map parser
+    plate_map_parser = subparsers.add_parser(
+        'plate-map',
+        help='Create or validate a reusable plate map CSV'
+    )
+    plate_map_parser.add_argument(
+        '--output',
+        type=str,
+        help='Path for the plate map CSV created by the GUI or default template'
+    )
+    plate_map_parser.add_argument(
+        '--default',
+        action='store_true',
+        help='Write the current default GDA-style map without opening the GUI'
+    )
+    plate_map_parser.add_argument(
+        '--validate',
+        type=str,
+        help='Validate an existing plate map CSV and exit'
+    )
     
     return parser
 
@@ -186,6 +211,9 @@ def run_gda(args):
     """Run the GDA module with CLI arguments."""
     # Import here to avoid circular imports and GUI loading
     from cellpyability import gda_analysis
+
+    if not getattr(args, 'plate_map', None) and (not args.upper_name or not args.lower_name):
+        raise ValueError("--upper-name and --lower-name are required unless --plate-map is provided")
     
     gda_analysis.run_gda(
         title_name=args.title,
@@ -196,7 +224,8 @@ def run_gda(args):
         image_dir=args.image_dir,
         show_plot=not args.no_plot,
         counts_file=getattr(args, 'counts_file', None),
-        output_dir=getattr(args, 'output_dir', None)
+        output_dir=getattr(args, 'output_dir', None),
+        plate_map_file=getattr(args, 'plate_map', None)
     )
 
 
@@ -231,6 +260,25 @@ def run_simple(args):
     )
 
 
+def run_plate_map(args):
+    """Run the plate-map GUI or non-interactive helpers."""
+    from cellpyability import interactive_map
+
+    if args.validate:
+        interactive_map.load_plate_map(args.validate)
+        print(f"Valid plate map: {args.validate}")
+        return
+
+    if args.default:
+        if not args.output:
+            raise ValueError("--default requires --output")
+        saved = interactive_map.save_plate_map(interactive_map.default_gda_plate_map(), args.output)
+        print(f"Saved default plate map: {saved}")
+        return
+
+    interactive_map.launch_plate_map_gui(output_csv=args.output)
+
+
 def main():
     """Main entry point for the CLI."""
     parser = create_parser()
@@ -243,6 +291,8 @@ def main():
             run_synergy(args)
         elif args.module == 'simple':
             run_simple(args)
+        elif args.module == 'plate-map':
+            run_plate_map(args)
         else:
             parser.print_help()
             sys.exit(1)

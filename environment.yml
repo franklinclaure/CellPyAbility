@@ -1,4 +1,4 @@
-name: CellPyAbility
+inname: CellPyAbility
 channels:
   - conda-forge
 dependencies:
