@@ -11,7 +11,7 @@ CellPyAbility is an open-source cell viability and dose-response analysis tool t
 
 - [Command Line Interface](#command-line-interface-cli): modern CLI for automated workflows and testing
 
-- [Windows Application](#running-the-windows-application): code-free executable for Windows OS
+- [Code-Free Application](#running-the-code-free-application): code-free executable for Windows OS
 
 - [Example Outputs](#example-outputs): examples of figures and tables for each module
 
@@ -80,11 +80,13 @@ cellpyability synergy \
 
 For command information while in the CLI, run `cellpyability --help` or `cellpyability <module> --help`.
 
-### Windows Application
-- Download the [Windows executable](windows_app/CellPyAbility.exe)
-  - We recommend moving CellPyAbility.exe into an empty directory (running it will create files)
-- Run CellPyAbility.exe and select the desired module from the menu
-- Enter the experiment info into the GUI
+## Code-Free Application
+
+Standalone executable applications are available for macOS and Windows. 
+
+📥 **[Download the latest release here](https://github.com/bindralab/cellpyability/releases/latest)**
+
+Navigate to the bottom of the release notes and download the `.zip` file for your respective operating system.
 
 ### Test Data
 - Download the [example GDA images](https://github.com/bindralab/CellPyAbility/tree/main/example/example_gda)
@@ -115,12 +117,11 @@ Reading the [protocols](protocol.pdf) first may aid in understanding the default
 - The synergy module requires a directory of 180 images
   - Wells of the same name (B2, ...) across three plates are triplicates
 
-### Windows Application Requirements
+### Code-Free Application Requirements
 
 - The user must have CellProfiler (tested on versions 4.2.5-4.2.8, though others may work)
-  - [Windows 64-bit Version 4.2.8](https://cellprofiler-releases.s3.amazonaws.com/CellProfiler-Windows-4.2.8.exe)
+- CellProfiler can be downloaded for macOS, Windows, and Linux [here](https://cellprofiler.org/releases).
 
-- The user must have Windows OS.
 
 ## Command Line Interface (CLI)
 
@@ -270,12 +271,16 @@ cellpyability gda --output-dir /path/to/results ...
 
 This ensures the package works correctly whether installed via PyPI or in development mode.
 
-## Running the Windows Application
-Running the Windows application requires no programming experience, Python environment, or dependencies. It is a single file containing all three modules with graphical user interfaces (GUIs) for user inputs.
+## Running the Code-Free Application
+Running the code-free application requires no programming experience, Python environment, or dependencies. It contains all three modules with graphical user interfaces (GUIs) for user inputs.
 
-Download the [CellPyAbility application](windows_app/CellPyAbility.exe). I recommend saving it to an empty directory dedicated to CellPyAbility because running the application will generate several files in its directory.
+📥 **[Download the latest release here](https://github.com/bindralab/cellpyability/releases/latest)**
 
-Upon the first run, CellPyAbility may take ~1 min to load. Once running, a GUI prompts the user to choose from three modules. Hovering over each module will give a description of its uses:
+Navigate to the bottom of the release notes and download the `.zip` file for your respective operating system.
+
+After opening the .zip files, the CellPyAbility application can be run. 
+
+Once running, a GUI prompts the user to choose from the three modules or the batch feature. Hovering over each button will give a description of its uses:
 
 - **GDA**: dose-response analysis of two cell lines in response to one treatment
 
@@ -283,12 +288,16 @@ Upon the first run, CellPyAbility may take ~1 min to load. Once running, a GUI p
 
 - **simple**: nuclei count matrix in a 96-well format
 
-After selecting a module, the application will look for the CellProfiler.exe in the default save locations:
-- "C:\Program Files\CellProfiler\CellProfiler.exe"
+- **batch**: use the provided config.csv to run multiple jobs in a batch
 
-- "C:\Program Files (x86)\CellProfiler\CellProfiler.exe"
+After selecting a module, the application will look for CellProfiler in the default save locations:
+- Windows
+  - "C:\Program Files\CellProfiler\CellProfiler.exe"
+  - "C:\Program Files (x86)\CellProfiler\CellProfiler.exe"
+- MacOS
+  - "/Applications/CellProfiler.app/Contents/MacOS/cp"
 
-If CellProfiler.exe cannot be found, the user will be prompted to input the path to the CellProfiler.exe file via the command line. The path is saved to a .txt file within the directory for future reference, so subsequent runs will proceed directly to the next step.
+If CellProfiler cannot be found, the user will be prompted to input the path to the CellProfiler file via a dialog box. The path is saved to a .txt file within the directory for future reference, so subsequent runs will proceed directly to the next step.
 
 A GUI specific to each module will prompt the user for experimental details. Using the GDA module as an example:
 - title of the experiment (e.g. 20250101_CellLine_Drug)
