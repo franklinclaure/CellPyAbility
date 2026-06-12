@@ -5,6 +5,33 @@ All notable changes to CellPyAbility will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-0611
+
+### What's Changed?
+
+**🚀 New Features**
+
+* **macOS Support:** The code-free GUI application is now fully packaged and available for macOS users. *(Note: See important macOS installation instructions below).*
+* **Native Batch Processing:** Batch processing is now a built-in feature for both the CLI and GUI applications, entirely eliminating the need for external bash scripts.
+
+**⚡ Enhancements & Optimizations**
+
+* **Improved Segmentation:** The default CellProfiler pipeline has been updated to utilize a three-class Otsu threshold (with the middle class assigned to the foreground). This significantly improves nuclei recall without negatively impacting precision.
+* **Backend Parity:** The GUI backend has been refactored to achieve parity with the CLI, leveraging vectorized NumPy operations to reduce calculation times.
+* **Streamlined UX:** CellProfiler's verbose terminal logging has been silenced and replaced with a clean, user-friendly progress bar.
+
+---
+
+**🍎 Important Note for macOS Users**
+Because this application is an open-source tool and not signed via the paid Apple Developer program, macOS Gatekeeper will automatically quarantine the downloaded `.zip` file.
+
+To run the application, extract the folder, open your Terminal, and run the following command to clear the quarantine flag before double-clicking the app:
+
+```bash
+xattr -dr com.apple.quarantine /path/to/extracted/CellPyAbility_Folder
+
+```
+
 ## [0.1.1] - 2026-06-09
 
 ### Added
