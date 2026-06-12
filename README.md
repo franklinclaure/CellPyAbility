@@ -11,7 +11,7 @@ CellPyAbility is an open-source cell viability and dose-response analysis tool t
 
 - [Command Line Interface](#command-line-interface-cli): modern CLI for automated workflows and testing
 
-- [Code-Free Application](#running-the-code-free-application): code-free executable for Windows OS
+- [Code-Free Application](#running-the-code-free-application): code-free application for macOS and Windows
 
 - [Example Outputs](#example-outputs): examples of figures and tables for each module
 
@@ -278,7 +278,18 @@ Running the code-free application requires no programming experience, Python env
 
 Navigate to the bottom of the release notes and download the `.zip` file for your respective operating system.
 
-After opening the .zip files, the CellPyAbility application can be run. 
+After opening the .zip files, the CellPyAbility application can be run.
+
+**Note for macOS users**
+
+Because this application is an open-source tool and not signed via the paid Apple Developer program, macOS Gatekeeper will automatically quarantine the downloaded `.zip` file.
+
+To run the application, extract the folder, open your Terminal, and run the following command to clear the quarantine flag before double-clicking the app:
+
+```bash
+xattr -dr com.apple.quarantine /path/to/extracted/CellPyAbility_Folder
+
+```
 
 Once running, a GUI prompts the user to choose from the three modules or the batch feature. Hovering over each button will give a description of its uses:
 
