@@ -329,6 +329,8 @@ A small GUI window will then prompt the user if they would like to run another e
 
 A log file with detailed logging is written to the directory. If the application fails at any point, it may be useful to consult the log for critical messages or to identify the last step to succeed.
 
+The source code for the GUI applications can be found in the [app_source](./app_source/) directory.
+
 ## Example Outputs
 ### GDA Module
 The GDA module outputs three tabular files with increasing degrees of analysis:
