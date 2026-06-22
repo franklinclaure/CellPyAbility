@@ -6,6 +6,7 @@ This module provides CLI commands to run the three main modules:
 - synergy: drug combination synergy analysis
 - simple: nuclei count matrix
 - plate-map: interactive plate map CSV builder
+- synergy-map: interactive synergy plate map CSV builder
 - batch: batch processing from a CSV configuration file
 """
 
@@ -159,6 +160,11 @@ def create_parser():
         type=str,
         help='Custom output directory (default: ./cellpyability_output/ in current working directory)'
     )
+    synergy_parser.add_argument(
+        '--plate-map',
+        type=str,
+        help='Optional compact synergy map CSV for code-based grouped analysis'
+    )
     
     # Simple module parser
     simple_parser = subparsers.add_parser(
@@ -206,6 +212,17 @@ def create_parser():
         '--validate',
         type=str,
         help='Validate an existing plate map CSV and exit'
+    )
+
+    # Synergy map parser
+    synergy_map_parser = subparsers.add_parser(
+        'synergy-map',
+        help='Create a compact synergy plate map CSV'
+    )
+    synergy_map_parser.add_argument(
+        '--output',
+        type=str,
+        help='Path for the synergy map CSV created by the GUI'
     )
     
     # Batch module parser
@@ -270,7 +287,8 @@ def run_synergy(args):
         image_dir=args.image_dir,
         show_plot=not args.no_plot,
         counts_file=getattr(args, 'counts_file', None),
-        output_dir=getattr(args, 'output_dir', None)
+        output_dir=getattr(args, 'output_dir', None),
+        plate_map_file=getattr(args, 'plate_map', None)
     )
 
 
@@ -303,6 +321,13 @@ def run_plate_map(args):
         return
 
     interactive_map.launch_plate_map_gui(output_csv=args.output)
+
+
+def run_synergy_map(args):
+    """Run the synergy-map GUI."""
+    from cellpyability import synergy_interactive_map
+
+    synergy_interactive_map.launch_synergy_map_gui(output_csv=args.output)
 
 
 def run_batch(args):
@@ -374,6 +399,8 @@ def main():
             run_simple(args)
         elif args.module == 'plate-map':
             run_plate_map(args)
+        elif args.module == 'synergy-map':
+            run_synergy_map(args)
         elif args.module == 'batch':
             run_batch(args)
         else:

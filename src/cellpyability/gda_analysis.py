@@ -56,11 +56,11 @@ def run_gda(title_name, upper_name, lower_name, top_conc, dilution, image_dir, s
     df_cp['well'] = df_cp['well'].apply(lambda x: tb.rename_wells(x))
     logger.debug('CellProfiler output rows renamed to well names.')
     
-    # Extract row/column designators for pivoting
-    df_cp[['Row','Column']] = df_cp['well'].str.extract(r'^([B-G])(\d+)$')
+    # Extract full 96-well row/column designators for pivoting
+    df_cp[['Row','Column']] = df_cp['well'].str.extract(r'^([A-H])([1-9]|1[0-2])$')
     if df_cp[['Row', 'Column']].isnull().any().any():
         raise tb.DataValidationError(
-            "Could not extract expected well coordinates (B-G, 2-11) from one or more filenames."
+            "Could not extract expected 96-well coordinates (A-H, 1-12) from one or more filenames."
         )
     logger.debug('Extracted Row and Column from well names.')
 
@@ -232,9 +232,17 @@ def _run_gda_from_plate_map(title_name, top_conc, dilution, df_cp, cp_csv, plate
     plate_map['is_vehicle'] = plate_map['is_vehicle'].astype(bool)
 
     df = df_cp.merge(plate_map, on='well', how='left', validate='many_to_one')
-    if df[interactive_map.PLATE_MAP_COLUMNS].isna().all(axis=1).any():
-        missing_wells = df.loc[df['genotype'].isna(), 'well'].tolist()
+    if df['row'].isna().any():
+        missing_wells = df.loc[df['row'].isna(), 'well'].tolist()
         raise ValueError(f'Counts contain wells not present in plate map: {missing_wells}')
+
+    # Blank compact-map cells are allowed and ignored by the analysis.
+    df = df[
+        df['genotype'].astype(str).str.len().gt(0)
+        & df['treatment_type'].astype(str).str.len().gt(0)
+    ].copy()
+    if df.empty:
+        raise ValueError('Plate map does not assign any wells for GDA analysis.')
 
     if not (df['treatment_type'] == 'vehicle').any():
         raise ValueError('Plate map must include at least one vehicle well.')
@@ -247,7 +255,11 @@ def _run_gda_from_plate_map(title_name, top_conc, dilution, df_cp, cp_csv, plate
     doses = tb.gen_dose_range(top_conc, dilution, max_index)
     dose_lookup = {0: 0.0}
     dose_lookup.update({idx: dose for idx, dose in enumerate(doses, start=1)})
-    df['concentration_index'] = df['concentration_index'].fillna('').replace('', 0).astype(int)
+    df['concentration_index'] = (
+        pd.to_numeric(df['concentration_index'].replace('', np.nan), errors='coerce')
+        .fillna(0)
+        .astype(int)
+    )
     df['Drug Concentration'] = df['concentration_index'].map(dose_lookup)
 
     vehicle_means = (
@@ -255,7 +267,7 @@ def _run_gda_from_plate_map(title_name, top_conc, dilution, df_cp, cp_csv, plate
         .groupby('genotype')['nuclei']
         .mean()
     )
-    missing_vehicle = sorted(set(df['genotype']) - set(vehicle_means.index))
+    missing_vehicle = sorted(set(gradient_rows['genotype']) - set(vehicle_means.index))
     if missing_vehicle:
         raise ValueError(f'Each genotype needs a vehicle control. Missing: {", ".join(missing_vehicle)}')
 
@@ -266,7 +278,7 @@ def _run_gda_from_plate_map(title_name, top_conc, dilution, df_cp, cp_csv, plate
     gda_output_dir.mkdir(exist_ok=True)
 
     grouped = (
-        df.groupby(['genotype', 'drug', 'gradient_id', 'gradient_axis', 'concentration_index', 'Drug Concentration'], dropna=False)
+        df.groupby(['genotype', 'drug', 'concentration_index', 'Drug Concentration'], dropna=False)
         .agg(
             Mean=('nuclei', 'mean'),
             Standard_Deviation=('nuclei', 'std'),
@@ -274,19 +286,19 @@ def _run_gda_from_plate_map(title_name, top_conc, dilution, df_cp, cp_csv, plate
             Relative_Standard_Deviation=('normalized_nuclei', 'std'),
             Wells=('well', lambda wells: ';'.join(sorted(wells))),
             N=('well', 'count'),
+            Map_Codes=('notes', lambda codes: ';'.join(sorted({str(code) for code in codes if str(code)}))),
         )
         .reset_index()
-        .sort_values(['genotype', 'concentration_index'])
+        .sort_values(['genotype', 'drug', 'concentration_index'])
     )
     grouped = grouped.rename(columns={
         'genotype': 'Genotype',
         'drug': 'Drug',
-        'gradient_id': 'Gradient ID',
-        'gradient_axis': 'Gradient Axis',
         'concentration_index': 'Concentration Index',
         'Standard_Deviation': 'Standard Deviation',
         'Normalized_Mean': 'Normalized Mean',
         'Relative_Standard_Deviation': 'Relative Standard Deviation',
+        'Map_Codes': 'Map Codes',
     })
     grouped.to_csv(gda_output_dir / f'{title_name}_gda_Stats.csv', index=False)
 
@@ -304,35 +316,96 @@ def _run_gda_from_plate_map(title_name, top_conc, dilution, df_cp, cp_csv, plate
             'Drug Concentration',
             'replicate_group',
             'replicate_index',
+            'notes',
             'nuclei',
             'normalized_nuclei',
         ]
     ].sort_values(['row', 'column'])
-    viability_matrix.to_csv(gda_output_dir / f'{title_name}_gda_ViabilityMatrix.csv', index=False)
+    viability_matrix = viability_matrix.rename(columns={'notes': 'map_code'})
+    viability_matrix.to_csv(gda_output_dir / f'{title_name}_gda_bywell.csv', index=False)
 
     plt.style.use('default')
-    for genotype, genotype_stats in grouped.groupby('Genotype'):
-        genotype_stats = genotype_stats[genotype_stats['Concentration Index'] > 0]
-        if genotype_stats.empty:
+    fig = plt.figure()
+    plotted_any = False
+    fitted_param_rows = []
+    selected_models = set()
+    plot_colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+    for curve_index, ((genotype, drug), curve_stats) in enumerate(grouped.groupby(['Genotype', 'Drug'])):
+        curve_stats = curve_stats[curve_stats['Concentration Index'] > 0].sort_values('Concentration Index')
+        if curve_stats.empty:
             continue
-        x = genotype_stats['Drug Concentration'].astype(float).to_numpy()
-        y = genotype_stats['Normalized Mean'].astype(float).to_numpy()
-        yerr = genotype_stats['Relative Standard Deviation'].astype(float).to_numpy()
+        x = curve_stats['Drug Concentration'].astype(float).to_numpy()
+        y = curve_stats['Normalized Mean'].astype(float).to_numpy()
+        yerr = curve_stats['Relative Standard Deviation'].astype(float).to_numpy()
+        label = f'{genotype} {drug}'
+        color = plot_colors[curve_index % len(plot_colors)]
         try:
-            x_fit, y_fit, ic50 = tb.fit_response_curve(x, y, genotype)
-            plt.plot(x_fit, y_fit, label=f'{genotype} fit')
-            plt.text(0.05, 0.08 + (0.04 * len(plt.gca().texts)), f'{genotype} IC50 = {ic50:.2e}', transform=plt.gca().transAxes)
+            comparison = tb.fit_response_models(x, y, label)
+            if comparison is None:
+                raise ValueError("Neither 4PL nor 5PL could be fit.")
+            selected_fit = comparison['selected_fit']
+            selected_model = comparison['selected_model']
+            selected_models.add(selected_model)
+            x_fit = selected_fit['x_fit']
+            y_fit = selected_fit['y_fit']
+            ic50 = selected_fit['params']['IC50']
+            plt.plot(x_fit, y_fit, color=color, label='_nolegend_')
+            plt.text(
+                0.05,
+                0.08 + (0.04 * len(plt.gca().texts)),
+                f'{label} {selected_model} IC50 = {ic50:.2e}',
+                color=color,
+                transform=plt.gca().transAxes,
+            )
+
+            fitted_params = dict(selected_fit['params'])
+            fitted_params.setdefault('Asym', 'NA')
+            fitted_params['RSS'] = selected_fit['RSS']
+            fitted_params['AUC'] = np.trapz(y_fit, x_fit)
+            fitted_params['Iterations'] = selected_fit['Iterations']
+            f_statistic = comparison['F Statistic']
+            f_value = "NA" if np.isnan(f_statistic) else f"{f_statistic:.6g}"
+            usage = "used" if selected_model == "5PL" else "not used"
+            fitted_params['5PL F Statistic'] = f"{f_value} ({usage})"
+            p_value = comparison['F p-value']
+            p_text = "NA" if np.isnan(p_value) else f"{p_value:.6g}"
+            significance = "stat significant" if np.isfinite(p_value) and p_value < comparison['alpha'] else "not stat significant"
+            fitted_params['p-value'] = f"{p_text} ({significance})"
+            fitted_param_rows.append((label, fitted_params))
         except Exception as exc:
-            logger.warning(f'Could not fit {genotype}: {exc}')
-        plt.scatter(x, y, label=str(genotype))
-        plt.errorbar(x, y, yerr=yerr, fmt='none', capsize=3)
+            logger.warning(f'Could not fit {label}: {exc}')
+        plt.scatter(x, y, color=color, label=label)
+        plt.errorbar(x, y, yerr=yerr, fmt='none', color=color, capsize=3)
+        plotted_any = True
 
     plt.xscale('log')
     plt.xlabel('Concentration (M)')
     plt.ylabel('Relative Cell Survival')
     plt.title(str(title_name))
-    plt.legend()
+    if selected_models:
+        model_title = " + ".join(sorted(selected_models, key=lambda model: int(model[0])))
+        fig.canvas.manager.set_window_title(f"{model_title} Plot")
+    if plotted_any:
+        plt.legend()
     plt.savefig(gda_output_dir / f'{title_name}_gda_plot.png', dpi=200, bbox_inches='tight')
+
+    fitted_param_columns = [
+        'Max', 'Infl.', 'Min', 'Slope', 'Asym', 'IC50', 'RSS', 'AUC',
+        'Iterations', '5PL F Statistic', 'p-value',
+    ]
+    fitted_params_table = pd.DataFrame(
+        [params for _, params in fitted_param_rows],
+        index=[label for label, _ in fitted_param_rows],
+        columns=fitted_param_columns,
+    )
+    for stale_name in (
+        f'{title_name}_gda_4pl_params.csv',
+        f'{title_name}_gda_5pl_params.csv',
+    ):
+        stale_path = gda_output_dir / stale_name
+        if stale_path.exists():
+            stale_path.unlink()
+    fitted_params_table.to_csv(gda_output_dir / f'{title_name}_gda_fitted_params.csv')
 
     if show_plot:
         plt.show()

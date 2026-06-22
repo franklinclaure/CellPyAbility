@@ -14,6 +14,7 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 from scipy.optimize import curve_fit
+from scipy.stats import f as f_distribution
 import shutil
 
 
@@ -544,20 +545,20 @@ def rename_counts(cp_csv, counts_csv):
 # Define models at module level so they are accessible
 def fivePL(x, A, B, C, D, G):
     """
-    Five-parameter logistic (5PL) dose-response model.
+    Five-parameter logistic (5PL) survival-response model.
     
     Parameters:
     -----------
     x : array-like
         Dose/concentration values
     A : float
-        Minimum asymptote (response at infinite dose)
+        Upper response asymptote
     B : float
         Hill slope
     C : float
         Inflection point (IC50/EC50)
     D : float
-        Maximum asymptote (response at zero dose)
+        Lower response asymptote
     G : float
         Asymmetry factor
     
@@ -567,6 +568,12 @@ def fivePL(x, A, B, C, D, G):
         Predicted response values
     """
     return ((A - D) / (1.0 + (x / C) ** B) ** G) + D
+
+
+def fourPL(x, A, B, C, D):
+    """Four-parameter logistic survival-response model."""
+    return fivePL(x, A, B, C, D, 1.0)
+
 
 def hill(x, Emax, EC50, HillSlope):
     """
@@ -590,60 +597,175 @@ def hill(x, Emax, EC50, HillSlope):
     """
     return Emax * (x**HillSlope) / (EC50**HillSlope + x**HillSlope)
 
-def fit_response_curve(x, y, name):
-    """
-    Fits 5PL, falls back to Hill, returns (x_plot, y_plot, IC50, params).
-    Solves for IC50 algebraically. Returns NaN if IC50 is unsolvable.
-    Input x and y should be numpy arrays.
-    """
-    # Create smooth x-axis for plotting
-    x_plot = np.logspace(np.log10(min(x[x > 0])), np.log10(max(x)), 1000)
 
-    # Initial Guesses (Heuristic)
+def _logistic_ic50(A, B, C, D, G):
+    """Solve for the concentration where the fitted response equals 0.5."""
+    try:
+        term = (A - D) / (0.5 - D)
+        root_term = (term ** (1 / G)) - 1
+        if term <= 0 or root_term <= 0:
+            raise ValueError("IC50 undefined (curve doesn't cross 0.5)")
+        return C * root_term ** (1 / B)
+    except (ValueError, ArithmeticError, FloatingPointError, ZeroDivisionError):
+        return np.nan
+
+
+def fit_response_models(x, y, name, alpha=0.05):
+    """Fit bounded 4PL and 5PL models and select one using a nested F test."""
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    valid = np.isfinite(x) & np.isfinite(y) & (x > 0)
+    x = x[valid]
+    y = y[valid]
+
+    if len(x) == 0:
+        logger.warning(f"Could not fit {name}. No finite positive dose points.")
+        return None
+
+    order = np.argsort(x)
+    x = x[order]
+    y = y[order]
+    if len(x) < 4:
+        logger.warning(f"Could not fit {name}. Need at least 4 valid points.")
+        return None
+
+    x_plot = np.logspace(np.log10(np.min(x)), np.log10(np.max(x)), 1000)
     y_max = np.max(y)
     y_min = np.min(y)
-    
-    # Find x closest to half-maximal response for initial C/EC50 guess
-    # We clip 0.5 to be between min and max to avoid indexing errors
     target_y = (y_max + y_min) / 2
-    idx = (np.abs(y - target_y)).argmin()
-    c_guess = x[idx]
-    
-    # [A (max), B (slope), C (inflection), D (min), G (asymmetry)]
-    p0_5PL = [y_max, 1.0, c_guess, y_min, 1.0] 
-    
-    # [Emax, EC50, HillSlope]
-    p0_Hill = [y_max, c_guess, 1.0]
+    c_guess = x[np.abs(y - target_y).argmin()]
+
+    five_fit = None
+    four_fit = None
+
+    if len(x) >= 5:
+        try:
+            p0_5pl = [y_max, 1.0, c_guess, y_min, 1.0]
+            popt_5pl, _, five_info, _, _ = curve_fit(
+                fivePL,
+                x,
+                y,
+                p0=p0_5pl,
+                bounds=(
+                    [1e-18, .1, 1e-18, 1e-18, 0.1],
+                    [2, 10, 1, 2, 10.0],
+                ),
+                method="trf",
+                maxfev=5000,
+                full_output=True,
+            )
+            A, B, C, D, G = popt_5pl
+            observed_fit = fivePL(x, *popt_5pl)
+            five_fit = {
+                "params": {
+                    "Max": A,
+                    "Infl.": C,
+                    "Min": D,
+                    "Slope": B,
+                    "Asym": G,
+                    "IC50": _logistic_ic50(A, B, C, D, G),
+                },
+                "RSS": float(np.sum((y - observed_fit) ** 2)),
+                "Iterations": int(five_info["nfev"]),
+                "x_fit": x_plot,
+                "y_fit": fivePL(x_plot, *popt_5pl),
+            }
+        except (RuntimeError, ValueError, TypeError, ArithmeticError, OverflowError):
+            logger.warning(f"Could not fit {name} with 5PL.")
 
     try:
-        # Try 5PL
-        popt, _ = curve_fit(fivePL, x, y, p0=p0_5PL, maxfev=5000)
-        
-        # Algebraic IC50 for 5PL
-        A, B, C, D, G = popt
-        
-        # Check domain validity for IC50 (must be able to take roots)
-        # We need the term inside the root to be positive
-        try:
-             term = (A - D) / (0.5 - D)
-             if term <= 0:
-                 raise ValueError("IC50 undefined (curve doesn't cross 0.5)")
-             
-             # Solve for x where y = 0.5
-             ic50 = C * ((term**(1/G)) - 1)**(1/B)
-        except (ValueError, ArithmeticError):
-             ic50 = np.nan
+        p0_4pl = [y_max, 1.0, c_guess, y_min]
+        popt_4pl, _, four_info, _, _ = curve_fit(
+            fourPL,
+            x,
+            y,
+            p0=p0_4pl,
+            bounds=(
+                [1e-18, .1, 1e-18, 1e-18],
+                [2, 10, 1, 2],
+            ),
+            method="trf",
+            maxfev=5000,
+            full_output=True,
+        )
+        A, B, C, D = popt_4pl
+        observed_fit = fourPL(x, *popt_4pl)
+        four_fit = {
+            "params": {
+                "Max": A,
+                "Infl.": C,
+                "Min": D,
+                "Slope": B,
+                "IC50": _logistic_ic50(A, B, C, D, 1.0),
+            },
+            "RSS": float(np.sum((y - observed_fit) ** 2)),
+            "Iterations": int(four_info["nfev"]),
+            "x_fit": x_plot,
+            "y_fit": fourPL(x_plot, *popt_4pl),
+        }
+    except (RuntimeError, ValueError, TypeError, ArithmeticError, OverflowError):
+        logger.warning(f"Could not fit {name} with 4PL.")
 
-        return x_plot, fivePL(x_plot, *popt), ic50
-        
-    except (RuntimeError, ValueError):
-        # Fallback to Hill
-        try:
-             popt, _ = curve_fit(hill, x, y, p0=p0_Hill, maxfev=10000)
-             # Hill parameter index 1 is EC50
-             ic50 = popt[1] 
-             return x_plot, hill(x_plot, *popt), ic50
-        except (RuntimeError, ValueError, ArithmeticError, OverflowError):
-             logger.warning(f"Could not fit {name}. Returning connect-the-dots")
-             # Return straight lines between points if fit fails
-             return x, y, np.nan
+    if four_fit is None and five_fit is None:
+        return None
+
+    f_statistic = np.nan
+    p_value = np.nan
+    selected_model = "4PL" if four_fit is not None else "5PL"
+
+    if four_fit is not None and five_fit is not None and len(x) > 5:
+        rss4 = four_fit["RSS"]
+        rss5 = five_fit["RSS"]
+        rss_difference = rss4 - rss5
+        if rss5 == 0:
+            if rss_difference > 0:
+                f_statistic = np.inf
+                p_value = 0.0
+            else:
+                p_value = 1.0
+        else:
+            f_statistic = (rss_difference / 1) / (rss5 / (len(x) - 5))
+            if f_statistic > 0:
+                p_value = float(f_distribution.sf(f_statistic, 1, len(x) - 5))
+            else:
+                p_value = 1.0
+        if np.isfinite(p_value) and p_value < alpha:
+            selected_model = "5PL"
+
+    selected_fit = five_fit if selected_model == "5PL" else four_fit
+    return {
+        "selected_model": selected_model,
+        "selected_fit": selected_fit,
+        "four_pl": four_fit,
+        "five_pl": five_fit,
+        "F Statistic": f_statistic,
+        "F p-value": p_value,
+        "alpha": alpha,
+        "n": len(x),
+    }
+
+
+def fit_response_curve(x, y, name, return_params=False):
+    """
+    Fit 4PL and 5PL, select by nested F test, and return the selected curve.
+    """
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    valid = np.isfinite(x) & np.isfinite(y) & (x > 0)
+    x = x[valid]
+    y = y[valid]
+    comparison = fit_response_models(x, y, name)
+    if comparison is None:
+        logger.warning(f"Could not fit {name}. Returning connect-the-dots.")
+        if return_params:
+            return x, y, np.nan, None
+        return x, y, np.nan
+
+    selected_fit = comparison["selected_fit"]
+    params = dict(selected_fit["params"])
+    params["Model"] = comparison["selected_model"]
+    params["RSS"] = selected_fit["RSS"]
+    ic50 = params["IC50"]
+    if return_params:
+        return selected_fit["x_fit"], selected_fit["y_fit"], ic50, params
+    return selected_fit["x_fit"], selected_fit["y_fit"], ic50

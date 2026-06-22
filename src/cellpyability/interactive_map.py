@@ -1,21 +1,22 @@
 """
 Interactive Matplotlib plate-map editor for CellPyAbility.
 
-The module keeps strict inner-60 CSV helpers for current analysis workflows and
-provides the Matplotlib GUI used to create compact reusable plate layouts.
+The module provides long-form 96-well CSV helpers and compact 8x12 layout
+parsing for reusable plate layouts.
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
+import re
 from pathlib import Path
 
 import pandas as pd
 
 
-INNER_ROWS = ["B", "C", "D", "E", "F", "G"]
-INNER_COLUMNS = [str(i) for i in range(2, 12)]
+INNER_ROWS = ["A", "B", "C", "D", "E", "F", "G", "H"]
+INNER_COLUMNS = [str(i) for i in range(1, 13)]
 PLATE_MAP_COLUMNS = [
     "well",
     "row",
@@ -34,7 +35,7 @@ PLATE_MAP_COLUMNS = [
 
 
 def inner_wells() -> list[str]:
-    """Return the 60 supported inner wells in plate order."""
+    """Return supported 96-well plate coordinates in plate order."""
     return [f"{row}{column}" for row in INNER_ROWS for column in INNER_COLUMNS]
 
 
@@ -110,10 +111,96 @@ def save_plate_map(df: pd.DataFrame, output_csv: str | Path) -> Path:
 
 
 def load_plate_map(input_csv: str | Path) -> pd.DataFrame:
-    """Load and validate a plate map CSV."""
+    """Load and validate a long-form or compact plate map CSV."""
     df = pd.read_csv(input_csv)
-    validate_plate_map(df)
-    return df[PLATE_MAP_COLUMNS].copy()
+    if set(PLATE_MAP_COLUMNS).issubset(df.columns):
+        validate_plate_map(df)
+        return df[PLATE_MAP_COLUMNS].copy()
+
+    compact_df = pd.read_csv(input_csv, header=None, dtype=str, keep_default_na=False)
+    return compact_plate_map_to_long(compact_df)
+
+
+def compact_plate_map_to_long(compact_df: pd.DataFrame) -> pd.DataFrame:
+    """Convert an 8x12 compact code grid into the canonical plate-map schema."""
+    if compact_df.shape != (8, 12):
+        raise ValueError(
+            f"Compact plate map must be exactly 8 rows x 12 columns; found {compact_df.shape[0]} x {compact_df.shape[1]}."
+        )
+
+    records = []
+    vehicle_pattern = re.compile(r"^g([12])v$")
+    gradient_pattern = re.compile(r"^g([12])d([1-5])c([1-9])$")
+
+    for row_idx, plate_row in enumerate(INNER_ROWS):
+        for col_idx, plate_column in enumerate(INNER_COLUMNS):
+            raw_code = str(compact_df.iat[row_idx, col_idx]).strip().lower()
+            well = f"{plate_row}{plate_column}"
+            record = {
+                "well": well,
+                "row": plate_row,
+                "column": int(plate_column),
+                "genotype": "",
+                "treatment_type": "",
+                "drug": "",
+                "gradient_id": "",
+                "gradient_axis": "",
+                "concentration_index": "",
+                "replicate_group": "",
+                "replicate_index": "",
+                "is_vehicle": False,
+                "notes": raw_code,
+            }
+
+            if raw_code in {"", "0"}:
+                records.append(record)
+                continue
+
+            vehicle_match = vehicle_pattern.match(raw_code)
+            if vehicle_match:
+                genotype_id = vehicle_match.group(1)
+                genotype = f"g{genotype_id}"
+                record.update(
+                    {
+                        "genotype": genotype,
+                        "treatment_type": "vehicle",
+                        "drug": "Vehicle",
+                        "gradient_id": "vehicle",
+                        "concentration_index": 0,
+                        "replicate_group": f"{genotype}_vehicle",
+                        "is_vehicle": True,
+                    }
+                )
+                records.append(record)
+                continue
+
+            gradient_match = gradient_pattern.match(raw_code)
+            if gradient_match:
+                genotype_id, drug_id, concentration_id = gradient_match.groups()
+                genotype = f"g{genotype_id}"
+                drug = f"d{drug_id}"
+                concentration_index = int(concentration_id)
+                record.update(
+                    {
+                        "genotype": genotype,
+                        "treatment_type": "drug_gradient",
+                        "drug": drug,
+                        "gradient_id": f"{genotype}_{drug}",
+                        "gradient_axis": "compact",
+                        "concentration_index": concentration_index,
+                        "replicate_group": f"{genotype}_{drug}_c{concentration_index}",
+                        "is_vehicle": False,
+                    }
+                )
+                records.append(record)
+                continue
+
+            raise ValueError(
+                f"Invalid compact plate-map code '{raw_code}' at {well}. "
+                "Use 0, blank, g1v/g2v, or g1d1c1 through g2d5c9."
+            )
+
+    return add_replicate_indices(pd.DataFrame(records, columns=PLATE_MAP_COLUMNS))
 
 
 def validate_plate_map(df: pd.DataFrame) -> None:
@@ -125,7 +212,7 @@ def validate_plate_map(df: pd.DataFrame) -> None:
     wells = df["well"].astype(str).tolist()
     expected_wells = inner_wells()
     if sorted(wells) != sorted(expected_wells):
-        raise ValueError("Plate map must contain exactly the inner wells B-G and 2-11.")
+        raise ValueError("Plate map must contain exactly the 96 wells A-H and 1-12.")
 
     if len(wells) != len(set(wells)):
         raise ValueError("Plate map contains duplicate wells.")
