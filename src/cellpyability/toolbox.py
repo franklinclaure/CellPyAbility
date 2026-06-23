@@ -96,21 +96,37 @@ def cellpyability_logger():
 # Define logger so it can be referenced in later functions
 logger = cellpyability_logger()
 
-# Establishes the base directory for package resources (read-only)
-# Use get_output_base_dir() for writable output directories
+# Establishes the base directory for persistent configuration (writable)
 def establish_base():
-    """Get the package installation directory (for reading resources like .cppipe files)."""
-    base_dir = Path(__file__).resolve().parent
+    """
+    Get the base directory for configuration and persistent state.
+    In frozen mode (Windows .exe), this is the directory containing the executable.
+    In script mode, this is the package directory.
+    """
+    if getattr(sys, 'frozen', False):
+        # Bundled executable - use the directory containing the .exe
+        return Path(sys.executable).resolve().parent
     
-    if not base_dir.exists():
-        logger.critical(f'Package directory {base_dir} does not exist.')
-        raise ConfigurationError(f'Package directory {base_dir} does not exist.')
-    
-    logger.info(f'Package directory {base_dir} established ...')
-    return base_dir
+    # Script mode - use the package directory
+    return Path(__file__).resolve().parent
 
-# Define base_dir for package resources (pipeline files, etc.)
+# Define base_dir for configuration files (cellprofiler_path.txt, etc.)
 base_dir = establish_base()
+
+def get_resource_path(relative_path):
+    """
+    Get the absolute path to a package resource.
+    Supports both development (script) mode and frozen (PyInstaller) mode.
+    """
+    if getattr(sys, 'frozen', False):
+        # PyInstaller extraction folder
+        base_path = Path(getattr(sys, '_MEIPASS', sys.executable))
+    else:
+        # Package source directory
+        base_path = Path(__file__).resolve().parent
+        
+    resource_path = base_path / relative_path
+    return resource_path.resolve()
 
 def get_output_base_dir(output_dir=None):
     """
@@ -351,14 +367,18 @@ def run_cellprofiler(image_dir, counts_file=None, output_dir=None):
     
     # Define the path to the CellProfiler pipeline (.cppipe) in the package directory
     pipeline_env = os.getenv("CELLPYABILITY_PIPELINE_PATH")
-    cppipe_path = Path(pipeline_env).expanduser().resolve() if pipeline_env else (base_dir / 'CellPyAbility.cppipe')
-    if cppipe_path.exists():
-        logger.debug('CellProfiler pipeline exists in package directory ...')
+    if pipeline_env:
+        cppipe_path = Path(pipeline_env).expanduser().resolve()
     else:
-        logger.critical('CellProfiler pipeline CellPyAbility.cppipe not found in package directory.')
-        logger.info('If you are using a different pipeline, make sure it is named CellPyAbility.cppipe and is in the package directory.')
+        # Use helper to find it in bundle or package
+        cppipe_path = get_resource_path('CellPyAbility.cppipe')
+
+    if cppipe_path.exists():
+        logger.debug(f'CellProfiler pipeline found at: {cppipe_path}')
+    else:
+        logger.critical(f'CellProfiler pipeline not found: {cppipe_path}')
         raise ConfigurationError(
-            f'CellProfiler pipeline CellPyAbility.cppipe not found: {cppipe_path}'
+            f'CellProfiler pipeline CellPyAbility.cppipe not found at {cppipe_path}'
         )
 
     ## Define the folder where CellProfiler will output the .csv results
@@ -399,19 +419,64 @@ def run_cellprofiler(image_dir, counts_file=None, output_dir=None):
         '-i', str(image_path_obj),
         '-o', str(cp_output_obj)
     ]
+    
+    # Pre-calculate total images for progress bar
+    image_extensions = {'.tif', '.tiff', '.png', '.jpg', '.jpeg'}
+    total_images = sum(1 for f in image_path_obj.iterdir() if f.suffix.lower() in image_extensions)
+    if total_images == 0:
+        logger.warning(f"No image files found in {image_path_obj}. CellProfiler may not have anything to process.")
+        total_images = 1 # Prevent division by zero if it runs anyway
+
+    logger.info("Starting image analysis. This may take a moment...")
+    
     try:
-        subprocess.run(command, check=True, capture_output=True, text=True, timeout=3600)
-    except subprocess.TimeoutExpired as e:
-        logger.error('CellProfiler execution timed out.')
-        raise CellProfilerExecutionError('CellProfiler timed out after 3600 seconds.') from e
-    except subprocess.CalledProcessError as e:
-        logger.error(f'CellProfiler execution failed with return code {e.returncode}.')
-        stderr = (e.stderr or "").strip()
-        stdout = (e.stdout or "").strip()
-        details = stderr if stderr else stdout
-        raise CellProfilerExecutionError(
-            f"CellProfiler failed (exit code {e.returncode}). {details}".strip()
-        ) from e
+        # Use Popen to stream output live
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            universal_newlines=True
+        )
+        
+        last_reported_image = 0
+        
+        for line in process.stdout:
+            # Look for lines like "Thu Jun 11 15:11:12 2026: Image # 1, module Images # 1"
+            match = re.search(r"Image\s+#\s+(\d+),\s+module", line)
+            if match:
+                current = int(match.group(1))
+                
+                # Only update the progress bar if we've moved to a new image
+                if current > last_reported_image:
+                    last_reported_image = current
+                    # Calculate progress
+                    percent = int(100 * current / total_images)
+                    bar_length = 30
+                    filled = int(bar_length * current / total_images)
+                    bar = '█' * filled + '-' * (bar_length - filled)
+                    # Use carriage return \r to stay on the same line
+                    sys.stdout.write(f'\rCellProfiler Progress: |{bar}| {percent}% ({current}/{total_images})')
+                    sys.stdout.flush()
+        
+        # Move to the next line after the progress bar finishes
+        if last_reported_image > 0:
+            sys.stdout.write('\n')
+            
+        process.wait()
+        if process.returncode != 0:
+            logger.error(f'CellProfiler execution failed with return code {process.returncode}.')
+            raise CellProfilerExecutionError(
+                f"CellProfiler failed (exit code {process.returncode}). Please check the console output for details."
+            )
+            
+    except Exception as e:
+        if not isinstance(e, CellProfilerExecutionError):
+            logger.error(f"Failed to run CellProfiler: {e}")
+            raise CellProfilerExecutionError("Failed to run CellProfiler.") from e
+        raise
+
     logger.info('CellProfiler nuclei counting complete.')
 
     # Define the path to the CellProfiler counting output

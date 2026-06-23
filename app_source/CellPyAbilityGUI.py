@@ -6,6 +6,7 @@ import sys
 import CellPyAbility_GDA_app
 import CellPyAbility_simple_app
 import CellPyAbility_synergy_app
+import CellPyAbility_batch_app
 
 # Define temporary directory so logo can be accessed later
 if getattr(sys, 'frozen', False):
@@ -76,9 +77,14 @@ def launch_gui():
     btn_synergy.grid(row=0, column=1, padx=5, pady=5)
     ToolTip(btn_synergy, "Dose-response analysis of one cell line in response to two treatments in combination")
 
+    btn_batch = tk.Button(button_frame, text="Batch", width=12,
+                          command=lambda: run_script(4))
+    btn_batch.grid(row=1, column=0, padx=5, pady=5)
+    ToolTip(btn_batch, "Run multiple experiments from a CSV configuration file")
+
     btn_simple = tk.Button(button_frame, text="simple", width=12,
                            command=lambda: run_script(3))
-    btn_simple.grid(row=0, column=2, padx=5, pady=5)
+    btn_simple.grid(row=1, column=1, padx=5, pady=5)
     ToolTip(btn_simple, "Raw nuclei count matrix")
 
     btn_exit = tk.Button(root, text="Exit", command=root.quit)
@@ -99,6 +105,8 @@ def run_script(script_number):
             CellPyAbility_synergy_app.run()
         elif script_number == 3:
             CellPyAbility_simple_app.run()
+        elif script_number == 4:
+            CellPyAbility_batch_app.run()
         else:
             raise ValueError("Invalid script selection.")
     except Exception as e:
