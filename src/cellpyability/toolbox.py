@@ -9,7 +9,9 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import numpy as np
@@ -36,6 +38,38 @@ class CellProfilerExecutionError(CellPyAbilityError):
 
 class DataValidationError(CellPyAbilityError):
     """Raised when expected data format/columns are not present."""
+
+#Making an empty 96 Well Plate that can be imported to both the GDA Plate Map and Synergy Plate Map
+
+ROWS = ["A", "B", "C", "D", "E", "F", "G", "H"]
+COLUMNS = [str(column) for column in range(1, 13)]
+
+
+def plate_wells() -> list[str]:
+    """Return supported 96-well plate coordinates in plate order so that a user-made csv map can be verified"""
+    return [f"{row}{column}" for row in ROWS for column in COLUMNS]
+
+
+def split_well(well: str) -> tuple[str, str]:
+    """Split a well like A12 into row and column labels that are added to the plate map df """
+    return well[0], well[1:]
+
+
+def build_plate_dataframe(
+    columns: list[str],
+    record_factory: Callable[[str, str, str], dict[str, Any]],
+) -> pd.DataFrame:
+    """Build a 96-well DataFrame using workflow-specific row contents."""
+    records = [
+        record_factory(f"{row}{column}", row, column)
+        for row in ROWS
+        for column in COLUMNS
+    ]
+    return pd.DataFrame(records, columns=columns)
+
+
+
+
 
 def cellpyability_logger():
     """
@@ -288,7 +322,7 @@ def get_cellprofiler_path():
 cp_path = None
 
 def _ensure_cellprofiler_path():
-    """Ensure CellProfiler path is set, calling get_cellprofiler_path if needed."""
+    """Ensure CellProfiler path is set when no counts file was provided by user"""
     global cp_path
     if cp_path is None:
         cp_path = get_cellprofiler_path()
@@ -422,7 +456,11 @@ def run_cellprofiler(image_dir, counts_file=None, output_dir=None):
     
     # Pre-calculate total images for progress bar
     image_extensions = {'.tif', '.tiff', '.png', '.jpg', '.jpeg'}
-    total_images = sum(1 for f in image_path_obj.iterdir() if f.suffix.lower() in image_extensions)
+    total_images = sum(
+        1
+        for f in image_path_obj.rglob("*")
+        if f.is_file() and f.suffix.lower() in image_extensions
+    )
     if total_images == 0:
         logger.warning(f"No image files found in {image_path_obj}. CellProfiler may not have anything to process.")
         total_images = 1 # Prevent division by zero if it runs anyway
@@ -532,11 +570,11 @@ def standardize_counts_dataframe(df_cp):
         return df_cp[['nuclei', 'well']].copy()
 
     # Identify count column
-    count_candidates = ['Count_Nuclei', 'count_nuclei', 'Nuclei', 'nuclei']
+    count_candidates = ['Count_nuclei', 'count_nuclei', 'Nuclei', 'nuclei']
     count_col = next((c for c in count_candidates if c in columns), None)
     
     # Identify well/filename column
-    well_candidates = ['FileName_DAPI', 'FileName_DNA', 'FileName', 'well']
+    well_candidates = ['FileName_DAPI', 'FileName_DNA', 'FileName', 'well', 'FileName_images']
     well_col = next((c for c in well_candidates if c in columns), None)
 
     # Heuristics for missing columns
@@ -638,29 +676,6 @@ def fivePL(x, A, B, C, D, G):
 def fourPL(x, A, B, C, D):
     """Four-parameter logistic survival-response model."""
     return fivePL(x, A, B, C, D, 1.0)
-
-
-def hill(x, Emax, EC50, HillSlope):
-    """
-    Hill equation for dose-response curves.
-    
-    Parameters:
-    -----------
-    x : array-like
-        Dose/concentration values
-    Emax : float
-        Maximum effect
-    EC50 : float
-        Half-maximal effective concentration
-    HillSlope : float
-        Hill coefficient (slope factor)
-    
-    Returns:
-    --------
-    array-like
-        Predicted response values
-    """
-    return Emax * (x**HillSlope) / (EC50**HillSlope + x**HillSlope)
 
 
 def _logistic_ic50(A, B, C, D, G):
@@ -778,6 +793,8 @@ def fit_response_models(x, y, name, alpha=0.05):
     p_value = np.nan
     selected_model = "4PL" if four_fit is not None else "5PL"
 
+
+    #f statistic test to determnine if 5PL error difference (in comparison to the 4PL) is statistically signifant
     if four_fit is not None and five_fit is not None and len(x) > 5:
         rss4 = four_fit["RSS"]
         rss5 = five_fit["RSS"]
@@ -810,27 +827,37 @@ def fit_response_models(x, y, name, alpha=0.05):
     }
 
 
-def fit_response_curve(x, y, name, return_params=False):
-    """
-    Fit 4PL and 5PL, select by nested F test, and return the selected curve.
-    """
-    x = np.asarray(x, dtype=float)
-    y = np.asarray(y, dtype=float)
-    valid = np.isfinite(x) & np.isfinite(y) & (x > 0)
-    x = x[valid]
-    y = y[valid]
-    comparison = fit_response_models(x, y, name)
-    if comparison is None:
-        logger.warning(f"Could not fit {name}. Returning connect-the-dots.")
-        if return_params:
-            return x, y, np.nan, None
-        return x, y, np.nan
+def fitted_params_table(fitted_param_rows):
+    """Build the selected-fit parameter table from fit_response_models results."""
+    fitted_param_columns = [
+        'Max', 'Infl.', 'Min', 'Slope', 'Asym', 'IC50', 'RSS', 'AUC',
+        'Iterations', '5PL F Statistic', 'p-value',
+    ]
+    rows = []
+    index = []
 
-    selected_fit = comparison["selected_fit"]
-    params = dict(selected_fit["params"])
-    params["Model"] = comparison["selected_model"]
-    params["RSS"] = selected_fit["RSS"]
-    ic50 = params["IC50"]
-    if return_params:
-        return selected_fit["x_fit"], selected_fit["y_fit"], ic50, params
-    return selected_fit["x_fit"], selected_fit["y_fit"], ic50
+    for label, comparison in fitted_param_rows:
+        if comparison is None:
+            continue
+        selected_fit = comparison['selected_fit']
+        selected_model = comparison['selected_model']
+        fitted_params = dict(selected_fit['params'])
+        fitted_params.setdefault('Asym', 'NA')
+        fitted_params['RSS'] = selected_fit['RSS']
+        fitted_params['AUC'] = np.trapz(selected_fit['y_fit'], selected_fit['x_fit'])
+        fitted_params['Iterations'] = selected_fit['Iterations']
+
+        f_statistic = comparison['F Statistic']
+        f_value = "NA" if np.isnan(f_statistic) else f"{f_statistic:.6g}"
+        usage = "used" if selected_model == "5PL" else "not used"
+        fitted_params['5PL F Statistic'] = f"{f_value} ({usage})"
+
+        p_value = comparison['F p-value']
+        p_text = "NA" if np.isnan(p_value) else f"{p_value:.6g}"
+        significance = "stat significant" if np.isfinite(p_value) and p_value < comparison['alpha'] else "not stat significant"
+        fitted_params['p-value'] = f"{p_text} ({significance})"
+
+        rows.append(fitted_params)
+        index.append(label)
+
+    return pd.DataFrame(rows, index=index, columns=fitted_param_columns)

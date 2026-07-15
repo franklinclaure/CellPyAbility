@@ -17,7 +17,7 @@ __all__ = [
     'gda_analysis',
     'synergy_analysis',
     'simple_analysis',
-    'interactive_map',
+    'GDA_interactive_map',
 ]
 
 

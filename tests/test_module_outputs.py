@@ -90,11 +90,16 @@ def test_gda_module():
     )
     
     # Check output file (in current working directory)
-    output_stats = Path.cwd() / "cellpyability_output/gda_output/test_gda_Stats.csv"
+    output_dir = Path.cwd() / "cellpyability_output/gda_output"
+    output_stats = output_dir / "test_gda_Stats.csv"
+    output_fitted_params = output_dir / "test_gda_fitted_params.csv"
     
     try:
         if not output_stats.exists():
             print(f"[FAIL] FAILED: Output file not created: {output_stats}")
+            return False
+        if not output_fitted_params.exists():
+            print(f"[FAIL] FAILED: Fitted params file not created: {output_fitted_params}")
             return False
         
         print(f"Output file created: {output_stats}")
@@ -130,29 +135,29 @@ def test_gda_module():
     return result
 
 
-def test_fit_response_curve_compares_4pl_and_5pl():
-    """Both logistic models are fit and the compatibility wrapper returns the selected one."""
+def test_fit_response_models_compares_4pl_and_5pl():
+    """Both logistic models are fit and the selected result includes curve details."""
     x = np.geomspace(1e-9, 1e-6, 9)
     y = tb.fivePL(x, 1.0, 1.2, 1e-7, 0.05, 3.0)
 
     comparison = tb.fit_response_models(x, y, "test")
-    x_fit, y_fit, ic50, params = tb.fit_response_curve(x, y, "test", return_params=True)
+    selected_fit = comparison["selected_fit"]
+    params = selected_fit["params"]
 
     assert comparison["four_pl"] is not None
     assert comparison["five_pl"] is not None
     assert comparison["four_pl"]["RSS"] >= 0
     assert comparison["five_pl"]["RSS"] >= 0
     assert comparison["selected_model"] in {"4PL", "5PL"}
-    assert params["Model"] == comparison["selected_model"]
-    assert np.isclose(params["RSS"], comparison["selected_fit"]["RSS"])
-    assert len(x_fit) == len(y_fit)
-    assert np.isclose(params["IC50"], ic50, equal_nan=True)
+    assert selected_fit["RSS"] >= 0
+    assert len(selected_fit["x_fit"]) == len(selected_fit["y_fit"])
+    assert np.isclose(params["IC50"], selected_fit["params"]["IC50"], equal_nan=True)
     assert params["Min"] >= 0
-    if params["Model"] == "5PL":
+    if comparison["selected_model"] == "5PL":
         assert 0.1 <= params["Asym"] <= 10
 
 
-def test_fit_response_curve_uses_trf_and_logistic_bounds(monkeypatch):
+def test_fit_response_models_uses_trf_and_logistic_bounds(monkeypatch):
     captured = []
 
     def fake_curve_fit(function, x, y, p0, **kwargs):
@@ -177,6 +182,24 @@ def test_fit_response_curve_uses_trf_and_logistic_bounds(monkeypatch):
     )
     assert captured[0]["p0"] == [np.max(y), 1.0, captured[0]["p0"][2], np.min(y), 1.0]
     assert captured[1]["p0"] == [np.max(y), 1.0, captured[1]["p0"][2], np.min(y)]
+
+
+def test_fitted_params_table_formats_selected_model_results():
+    x = np.geomspace(1e-9, 1e-6, 9)
+    y = tb.fivePL(x, 1.0, 1.2, 1e-7, 0.05, 3.0)
+    comparison = tb.fit_response_models(x, y, "test")
+
+    table = tb.fitted_params_table([("test", comparison)])
+
+    assert list(table.columns) == [
+        "Max", "Infl.", "Min", "Slope", "Asym", "IC50", "RSS", "AUC",
+        "Iterations", "5PL F Statistic", "p-value",
+    ]
+    assert table.index.tolist() == ["test"]
+    assert np.isclose(table.loc["test", "RSS"], comparison["selected_fit"]["RSS"])
+    assert table.loc["test", "5PL F Statistic"].endswith(
+        "(used)" if comparison["selected_model"] == "5PL" else "(not used)"
+    )
 
 
 def test_fit_response_models_uses_f_test_for_model_selection(monkeypatch):
@@ -243,7 +266,7 @@ def test_gda_compact_plate_map_normalizes_and_groups_by_genotype_drug(tmp_path, 
             "x_fit": x_fit,
             "y_fit": y_fit,
         }
-        selected_model = "4PL" if name == "g1 d1" else "5PL"
+        selected_model = "4PL" if name == "g1 (Alpha) d1" else "5PL"
         selected_fit = four_fit if selected_model == "4PL" else five_fit
         f_statistic = 0.5 if selected_model == "4PL" else 4.0
         return {
@@ -315,6 +338,7 @@ def test_gda_compact_plate_map_normalizes_and_groups_by_genotype_drug(tmp_path, 
         counts_file=str(counts_file),
         output_dir=str(tmp_path),
         plate_map_file=str(compact_map),
+        genotype_names={"g1": "Alpha", "g2": "Beta"},
     )
 
     stats = pd.read_csv(tmp_path / "gda_output/compact_gda_Stats.csv")
@@ -329,7 +353,7 @@ def test_gda_compact_plate_map_normalizes_and_groups_by_genotype_drug(tmp_path, 
     assert "d5" not in set(stats["Drug"])
 
     g1_d1_c1 = stats[
-        (stats["Genotype"] == "g1")
+        (stats["Genotype"] == "g1 (Alpha)")
         & (stats["Drug"] == "d1")
         & (stats["Concentration Index"] == 1)
     ].iloc[0]
@@ -338,7 +362,7 @@ def test_gda_compact_plate_map_normalizes_and_groups_by_genotype_drug(tmp_path, 
     assert g1_d1_c1["Wells"] == "B1;B2"
 
     g1_d2_c1 = stats[
-        (stats["Genotype"] == "g1")
+        (stats["Genotype"] == "g1 (Alpha)")
         & (stats["Drug"] == "d2")
         & (stats["Concentration Index"] == 1)
     ].iloc[0]
@@ -346,7 +370,7 @@ def test_gda_compact_plate_map_normalizes_and_groups_by_genotype_drug(tmp_path, 
     assert np.isclose(g1_d2_c1["Normalized Mean"], 93.5 / 110)
 
     g2_d1_c1 = stats[
-        (stats["Genotype"] == "g2")
+        (stats["Genotype"] == "g2 (Beta)")
         & (stats["Drug"] == "d1")
         & (stats["Concentration Index"] == 1)
     ].iloc[0]
@@ -354,21 +378,22 @@ def test_gda_compact_plate_map_normalizes_and_groups_by_genotype_drug(tmp_path, 
     assert np.isclose(g2_d1_c1["Normalized Mean"], 0.5)
 
     assert set(viability["map_code"]) >= {"g1v", "g2v", "g1d1c1", "g1d2c1", "g2d1c1"}
+    assert set(viability["genotype"]) >= {"g1 (Alpha)", "g2 (Beta)"}
     assert list(fitted_params.columns) == [
         "Max", "Infl.", "Min", "Slope", "Asym", "IC50", "RSS", "AUC",
         "Iterations", "5PL F Statistic", "p-value",
     ]
-    assert set(fitted_params.index) == {"g1 d1", "g1 d2", "g2 d1"}
-    assert fitted_params.loc["g1 d1", "Asym"] == "NA"
-    assert fitted_params.loc["g1 d1", "RSS"] == 2.0
-    assert fitted_params.loc["g1 d1", "Iterations"] == 8
-    assert fitted_params.loc["g1 d1", "5PL F Statistic"] == "0.5 (not used)"
-    assert fitted_params.loc["g1 d1", "p-value"] == "0.5 (not stat significant)"
-    assert fitted_params.loc["g1 d2", "Asym"] == "2.0"
-    assert fitted_params.loc["g1 d2", "RSS"] == 1.0
-    assert fitted_params.loc["g1 d2", "Iterations"] == 6
-    assert fitted_params.loc["g1 d2", "5PL F Statistic"] == "4 (used)"
-    assert fitted_params.loc["g1 d2", "p-value"] == "0.04 (stat significant)"
+    assert set(fitted_params.index) == {"g1 (Alpha) d1", "g1 (Alpha) d2", "g2 (Beta) d1"}
+    assert fitted_params.loc["g1 (Alpha) d1", "Asym"] == "NA"
+    assert fitted_params.loc["g1 (Alpha) d1", "RSS"] == 2.0
+    assert fitted_params.loc["g1 (Alpha) d1", "Iterations"] == 8
+    assert fitted_params.loc["g1 (Alpha) d1", "5PL F Statistic"] == "0.5 (not used)"
+    assert fitted_params.loc["g1 (Alpha) d1", "p-value"] == "0.5 (not stat significant)"
+    assert fitted_params.loc["g1 (Alpha) d2", "Asym"] == "2.0"
+    assert fitted_params.loc["g1 (Alpha) d2", "RSS"] == 1.0
+    assert fitted_params.loc["g1 (Alpha) d2", "Iterations"] == 6
+    assert fitted_params.loc["g1 (Alpha) d2", "5PL F Statistic"] == "4 (used)"
+    assert fitted_params.loc["g1 (Alpha) d2", "p-value"] == "0.04 (stat significant)"
     assert np.isfinite(fitted_params["AUC"]).all()
 
 
@@ -416,7 +441,7 @@ def test_synergy_module():
             print(f"   {message}")
             assert (output_dir / "test_synergy_FittedViabilityMatrix.csv").exists()
             assert (output_dir / "test_synergy_FittedBlissMatrix.csv").exists()
-            assert (output_dir / "test_synergy_curve_fits.csv").exists()
+            assert (output_dir / "test_synergy_fitted_params.csv").exists()
             assert (output_dir / "test_synergy_curve_fits.png").exists()
             assert (output_dir / "test_synergy_plot.html").exists()
             measured_viability = pd.read_csv(
@@ -453,7 +478,7 @@ def test_synergy_module():
                     - fitted_viability.iloc[1:, 1:].to_numpy(dtype=float)
                 ),
             )
-            fit_diagnostics = pd.read_csv(output_dir / "test_synergy_curve_fits.csv")
+            fit_diagnostics = pd.read_csv(output_dir / "test_synergy_fitted_params.csv")
             assert set(fit_diagnostics["Direction"]) == {"horizontal"}
             assert len(fit_diagnostics) == 6
             result = True

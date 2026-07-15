@@ -7,20 +7,24 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
+import sys
+print(sys.executable)
 
 from . import toolbox as tb
 
-# Initialize toolbox
-logger, base_dir = tb.logger, tb.base_dir
+logger = tb.logger
 
 
+# Fitted model helpers
 def _evaluate_selected_logistic(comparison, concentrations):
-    """Evaluate the selected 4PL or 5PL model at arbitrary concentrations."""
+    """Use the selected fitted model to predict viability at the given concentrations."""
     params = comparison["selected_fit"]["params"]
+    
+
     if comparison["selected_model"] == "5PL":
         return tb.fivePL(
             concentrations,
-            params["Max"],
+            params["Max"], # 
             params["Slope"],
             params["Infl."],
             params["Min"],
@@ -36,7 +40,7 @@ def _evaluate_selected_logistic(comparison, concentrations):
 
 
 def _evaluate_at_tested_doses(comparison, doses, zero_value):
-    """Evaluate a selected model at tested doses while preserving the measured zero dose."""
+    """Evaluate a selected model at tested doses while preserving the measured zero dose for the control."""
     doses = np.asarray(doses, dtype=float)
     values = np.empty(doses.shape, dtype=float)
     positive = doses > 0
@@ -49,6 +53,8 @@ def _fit_synergy_direction(viability_matrix, x_doses, y_doses, direction, visual
     """Fit every matrix slice in one direction and build its dense viability surface."""
     slice_results = []
     if direction == "horizontal":
+        #loop horizontally through each Drug Y dose and fit viability horizontally across each concentration of Drug X. 
+        #Save concentration and the full the full 4PL-vs-5PL fitting report for that row/column in a tuple part of slice_results list
         for row_idx, fixed_dose in enumerate(y_doses):
             comparison = tb.fit_response_models(
                 x_doses,
@@ -56,13 +62,14 @@ def _fit_synergy_direction(viability_matrix, x_doses, y_doses, direction, visual
                 f"horizontal y={fixed_dose:.6g}",
             )
             if comparison is None:
-                return None
+                return None #If fitting doesn't work for any row you can't use this direction
             slice_results.append((fixed_dose, comparison))
 
-        dense_axis = np.insert(slice_results[0][1]["selected_fit"]["x_fit"], 0, visual_zero)
+        dense_axis = np.insert(slice_results[0][1]["selected_fit"]["x_fit"], 0, visual_zero)#Log plots can't have 0 x value, so a very tiny fake value is inserted instead
+        #Loops through each slice and makes a list of predicted viablity values for each x concentration based on the selected fit seen in comparison. Stacks the lists for each slice vertically.
         fitted_values = np.vstack([
             _evaluate_selected_logistic(comparison, dense_axis)
-            for _, comparison in slice_results
+            for _, comparison in slice_results #loops
         ])
         fitted_x = dense_axis
         fitted_y = np.asarray(y_doses, dtype=float)
@@ -121,12 +128,14 @@ def _choose_synergy_fit_direction(
 
     horizontal = None
     vertical = None
+    #Choose fit based on direction has more points to fit 
     if horizontal_points > vertical_points:
         horizontal = _fit_synergy_direction(
             viability_matrix, x_doses, y_doses, "horizontal", x_visual_zero
         )
         if horizontal is not None:
             return horizontal
+        #if for some reason the horizontal fit fails, try vertical fit as a backup
         return _fit_synergy_direction(
             viability_matrix, x_doses, y_doses, "vertical", y_visual_zero
         )
@@ -141,25 +150,32 @@ def _choose_synergy_fit_direction(
             viability_matrix, x_doses, y_doses, "horizontal", x_visual_zero
         )
 
+    #Scenario where both directions have same number of points.
     horizontal = _fit_synergy_direction(
         viability_matrix, x_doses, y_doses, "horizontal", x_visual_zero
     )
     vertical = _fit_synergy_direction(
         viability_matrix, x_doses, y_doses, "vertical", y_visual_zero
     )
+
+    #First check if either direction fails to fit.
     if horizontal is None:
         return vertical
     if vertical is None:
         return horizontal
 
+    #If one direction has a fitted 5PL for any of its slices, and the other doesn't, choose the one with 5PL.
     if horizontal["supports_5pl"] != vertical["supports_5pl"]:
         return horizontal if horizontal["supports_5pl"] else vertical
+    #If both directions have 5PL, choose the one with the lower sum of RSS values across its 5PL slices.
+    #***Potentially could change to change to lowest sum of RSS values across all slice and not just 5PL slices.
     if horizontal["supports_5pl"]:
         return (
             horizontal
             if horizontal["five_rss_sum"] <= vertical["five_rss_sum"]
             else vertical
         )
+    #If neither direction has 5PL, choose the one with the lower sum of RSS values across its 4PL slices.
     return (
         horizontal
         if horizontal["four_rss_sum"] <= vertical["four_rss_sum"]
@@ -172,6 +188,7 @@ def _synergy_fit_diagnostics(selected_surface, x_drug, y_drug):
     rows = []
     direction = selected_surface["direction"]
     fixed_drug = y_drug if direction == "horizontal" else x_drug
+    #append a dictionary of information pertinent to the selected fit for each slice or "fixed dose" of the "fixed drug" to rows list.
     for fixed_dose, comparison in selected_surface["slices"]:
         selected_fit = comparison["selected_fit"]
         selected_params = selected_fit["params"]
@@ -212,20 +229,21 @@ def _synergy_fit_diagnostics(selected_surface, x_drug, y_drug):
                 "AUC": np.trapz(selected_fit["y_fit"], selected_fit["x_fit"]),
             }
         )
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows)#make a Data Frame with keys as columns names and values as values for each row
 
 
 def _save_synergy_curve_plot(
     title_name,
     selected_surface,
     viability_matrix,
+    viability_sd_matrix,
     x_doses,
     y_doses,
     x_drug,
     y_drug,
     synergy_output_dir,
 ):
-    """Save every selected 4PL/5PL slice as a GDA-style dose-response panel."""
+    """Save every selected 4PL/5PL slice as a separate GDA-style dose-response panel."""
     direction = selected_surface["direction"]
     slices = selected_surface["slices"]
     panel_count = len(slices)
@@ -257,6 +275,14 @@ def _save_synergy_curve_plot(
             if direction == "horizontal"
             else viability_matrix.iloc[:, panel_index].to_numpy(dtype=float)
         )
+        measured_sd = None
+        if viability_sd_matrix is not None:
+            measured_sd = (
+                viability_sd_matrix.iloc[panel_index].to_numpy(dtype=float)
+                if direction == "horizontal"
+                else viability_sd_matrix.iloc[:, panel_index].to_numpy(dtype=float)
+            )
+            measured_sd = np.nan_to_num(measured_sd, nan=0.0, posinf=0.0, neginf=0.0)
         color = colors[panel_index % len(colors)]
 
         axis.plot(
@@ -265,10 +291,15 @@ def _save_synergy_curve_plot(
             color=color,
             label=f"{selected_model} fit",
         )
-        axis.scatter(
+        axis.errorbar(
             curve_doses[positive],
             measured[positive],
+            yerr=measured_sd[positive] if measured_sd is not None else None,
+            fmt="o",
             color=color,
+            ecolor=color,
+            elinewidth=1,
+            capsize=3,
             label="Measured viability",
             zorder=3,
         )
@@ -307,9 +338,10 @@ def _build_tested_fitted_matrices(
     """Evaluate selected curves at tested doses and calculate combination-only Bliss."""
     x_doses = np.asarray(x_doses, dtype=float)
     y_doses = np.asarray(y_doses, dtype=float)
-    measured = viability_matrix.to_numpy(dtype=float)
-    fitted = measured.copy()
-
+    measured = viability_matrix.to_numpy(dtype=float) #make a numpy array of the original measured viability values.
+    fitted = measured.copy()#make a copy of the original data array that will be changed to the fitted values for each slice.
+    
+    #Loop through each slice and determine the fitted viability value for each dose according to the selected fit(5PL or 4PL)
     if selected_surface["direction"] == "horizontal":
         for row_idx, (_, comparison) in enumerate(selected_surface["slices"]):
             fitted[row_idx, :] = _evaluate_at_tested_doses(
@@ -317,12 +349,12 @@ def _build_tested_fitted_matrices(
                 x_doses,
                 measured[row_idx, 0],
             )
-        x_alone_comparison = selected_surface["slices"][0][1]
+        x_alone_comparison = selected_surface["slices"][0][1]#Becuase slices are cut horizontally, the first slice is the one with Drug Y at 0, which is the Drug X alone slice.
         y_alone_comparison = tb.fit_response_models(
             y_doses,
             measured[:, 0],
             "fitted Bliss Drug Y alone",
-        )
+        )#Even though the first value of each slice is tecnichally Drug Y alone, we still need to fit the Drug Y alone viabilities to have more accurate bliss calculations.
     else:
         for column_idx, (_, comparison) in enumerate(selected_surface["slices"]):
             fitted[:, column_idx] = _evaluate_at_tested_doses(
@@ -355,18 +387,19 @@ def _build_tested_fitted_matrices(
         if y_alone_comparison is not None
         else measured[:, 0].copy()
     )
+    #If you can't fit either of the singl-drugs to a 4PL or 5PL, the measured values are used for the observed single-drug viabilities in the fitted Bliss calculation. 
     if x_alone_comparison is None or y_alone_comparison is None:
         logger.warning(
             "A single-drug edge could not be fit; measured edge viability was used "
             "for the fitted Bliss expectation."
         )
-
+    #Ensure BOTH alone curves are placed in the fitted matrix, even if one of them was already put in during the loop above.
     fitted[0, :] = fitted_x_alone
     fitted[:, 0] = fitted_y_alone
     fitted[0, 0] = measured[0, 0]
 
-    fitted_expected = np.outer(fitted_y_alone, fitted_x_alone)
-    fitted_bliss = fitted_expected - fitted
+    fitted_expected = np.outer(fitted_y_alone, fitted_x_alone)#makes a matrix of expected viabilities based on fitted single-drug curves.
+    fitted_bliss = fitted_expected - fitted #makes a matrix of bliss scores
     fitted_bliss[0, :] = np.nan
     fitted_bliss[:, 0] = np.nan
     return fitted, fitted_bliss, fitted_x_alone, fitted_y_alone
@@ -379,6 +412,7 @@ def _save_fitted_synergy_surface(
     x_dilution,
     y_dilution,
     viability_matrix,
+    viability_sd_matrix,
     x_doses,
     y_doses,
     synergy_output_dir,
@@ -389,29 +423,29 @@ def _save_fitted_synergy_surface(
     y_doses = np.asarray(y_doses, dtype=float)
     x_min_nonzero = np.min(x_doses[x_doses > 0])
     y_min_nonzero = np.min(y_doses[y_doses > 0])
-    visual_dilution = max(x_dilution, y_dilution)
-    x_visual_zero = x_min_nonzero / visual_dilution
+    visual_dilution = max(x_dilution, y_dilution)# * Why max though? Why not just the dilution of each drug?  
+    x_visual_zero = x_min_nonzero / visual_dilution #the fake zero isn't arbitary, it takes the lowest non-zero dose and divides it by the higest dilution factor of the two drugs.
     y_visual_zero = y_min_nonzero / visual_dilution
-
-    horizontal_zero = x_visual_zero
-    vertical_zero = y_visual_zero
     selected_surface = _choose_synergy_fit_direction(
         viability_matrix,
         x_doses,
         y_doses,
-        horizontal_zero,
-        vertical_zero,
+        x_visual_zero,
+        y_visual_zero,
     )
     if selected_surface is None:
         raise tb.DataValidationError("Could not create a complete fitted synergy surface.")
 
+    
     if selected_surface["direction"] == "horizontal":
-        fitted_x_plot = selected_surface["x_plot"]
-        fitted_y_plot = np.where(y_doses == 0, y_visual_zero, y_doses)
+        fitted_x_plot = selected_surface["x_plot"] # Includes the many interpolated points for the smooth curve.
+        fitted_y_plot = np.where(y_doses == 0, y_visual_zero, y_doses) # Contains only the tested doses of Drug Y, with the fake zero for plotting.
     else:
         fitted_x_plot = np.where(x_doses == 0, x_visual_zero, x_doses)
         fitted_y_plot = selected_surface["y_plot"]
 
+
+    #Carries out Bliss Calculations and returns related matrices
     (
         tested_fitted_viability,
         tested_fitted_bliss,
@@ -423,7 +457,7 @@ def _save_fitted_synergy_surface(
         x_doses,
         y_doses,
     )
-
+    #Making the actual dense viability and dense bliss matricesfor the fitted surface plot.
     dense_fitted_viability = selected_surface["viability"].copy()
     if selected_surface["direction"] == "horizontal":
         dense_fitted_viability[:, 0] = tested_fitted_y_alone
@@ -433,26 +467,30 @@ def _save_fitted_synergy_surface(
         dense_fitted_viability[0, :] = tested_fitted_x_alone
         dense_fitted_x_alone = tested_fitted_x_alone
         dense_fitted_y_alone = dense_fitted_viability[:, 0]
+
     dense_fitted_viability[0, 0] = viability_matrix.iloc[0, 0]
     dense_fitted_expected = np.outer(dense_fitted_y_alone, dense_fitted_x_alone)
     dense_fitted_bliss = dense_fitted_expected - dense_fitted_viability
+
+    #Deletes single drug Bliss values from the fitted Bliss matrix as they are not relevant for a synergy analysis
     dense_fitted_bliss[0, :] = np.nan
     dense_fitted_bliss[:, 0] = np.nan
 
+    #making a data fram for fitted information that will be saved to a csv file.
     fitted_viability_out = pd.DataFrame(
         tested_fitted_viability,
         index=y_doses,
         columns=x_doses,
     )
-    fitted_viability_out.index.name = f"{y_drug} (M)"
-    fitted_viability_out.columns.name = f"{x_drug} (M)"
+    fitted_viability_out.index.name = f"{[y_drug]} / {[x_drug]} M"
+    fitted_viability_out.columns.name = None
     fitted_bliss_out = pd.DataFrame(
         tested_fitted_bliss,
-        index=y_doses,
+        index=y_doses,#rows
         columns=x_doses,
     )
-    fitted_bliss_out.index.name = f"{y_drug} (M)"
-    fitted_bliss_out.columns.name = f"{x_drug} (M)"
+    fitted_bliss_out.index.name = f"{[y_drug]} / {[x_drug]} M"
+    fitted_bliss_out.columns.name = None
 
     fitted_viability_out.to_csv(
         synergy_output_dir / f"{title_name}_synergy_FittedViabilityMatrix.csv"
@@ -462,13 +500,14 @@ def _save_fitted_synergy_surface(
         na_rep="NA",
     )
     _synergy_fit_diagnostics(selected_surface, x_drug, y_drug).to_csv(
-        synergy_output_dir / f"{title_name}_synergy_curve_fits.csv",
+        synergy_output_dir / f"{title_name}_synergy_fitted_params.csv",
         index=False,
     )
     _save_synergy_curve_plot(
         title_name=title_name,
         selected_surface=selected_surface,
         viability_matrix=viability_matrix,
+        viability_sd_matrix=viability_sd_matrix,
         x_doses=x_doses,
         y_doses=y_doses,
         x_drug=x_drug,
@@ -486,7 +525,7 @@ def _save_fitted_synergy_surface(
         selected_surface["direction"],
         direction_rss,
     )
-
+    #Plotly surface plot of the fitted synergy surface with Bliss as the heatmap.
     fig = go.Figure(data=[
         go.Surface(
             z=dense_fitted_viability,
@@ -499,6 +538,7 @@ def _save_fitted_synergy_surface(
             colorbar=dict(title="Fitted Bliss Independence"),
         ),
     ])
+    #Adding axis titles, setting axis to log, and formatting ticks to scientific notation.
     fig.update_layout(
         title=f"{title_name} ({selected_surface['direction']} logistic surface)",
         scene=dict(
@@ -517,11 +557,13 @@ def _save_fitted_synergy_surface(
             zaxis=dict(title="Relative Cell Survival", range=[0, 1.1]),
         ),
     )
+    #Save plot as html
     fig.write_html(synergy_output_dir / f"{title_name}_synergy_plot.html")
     if show_plot:
         fig.show()
 
 
+# Main fixed-layout synergy entrypoint
 def run_synergy(title_name, x_drug, x_top_conc, x_dilution, y_drug, y_top_conc, y_dilution, image_dir, show_plot=True, counts_file=None, output_dir=None, plate_map_file=None):
     """
     Run synergy analysis for drug combination experiments.
@@ -555,14 +597,12 @@ def run_synergy(title_name, x_drug, x_top_conc, x_dilution, y_drug, y_top_conc, 
         are produced instead of the historical fixed B-G / 2-11 matrix.
     """
     
-    # Calculate concentration gradients (NumPy arrays)
-    x_doses = tb.gen_dose_range(x_top_conc, x_dilution, 9) # 9 doses without vehicle (cols 3-11)
-    y_doses = tb.gen_dose_range(y_top_conc, y_dilution, 5) # 5 doses without vehicle (rows C-G)
+    x_doses = tb.gen_dose_range(x_top_conc, x_dilution, 9) # Makes a dose gradient for the 9 doses of Drug X (columns 2-11)
+    y_doses = tb.gen_dose_range(y_top_conc, y_dilution, 5) # Makes a dose gradient for the 5 doses of Drug Y (rows B-G)
     
-    # Run CellProfiler
     df_cp, cp_csv = tb.run_cellprofiler(image_dir, counts_file=counts_file, output_dir=output_dir)
     
-    # Standardize CellProfiler counts columns and map to our 96-well plate
+    # Standardize CellProfiler counts column names and map to our 96-well plate
     df_cp = tb.standardize_counts_dataframe(df_cp)
     df_cp['well'] = df_cp['well'].apply(lambda x: tb.rename_wells(x))
 
@@ -581,34 +621,32 @@ def run_synergy(title_name, x_drug, x_top_conc, x_dilution, y_drug, y_top_conc, 
             show_plot=show_plot,
             output_dir=output_dir,
         )
-    
-    # Extract rows and columns
+    #make columns for the row and column of each well based off the well name
     df_cp[['Row','Column']] = df_cp['well'].str.extract(r'^([B-G])(\d+)$')
     if df_cp[['Row', 'Column']].isnull().any().any():
         raise tb.DataValidationError(
             "Could not extract expected well coordinates (B-G, 2-11) from one or more filenames."
         )
     
-    # Create viability matrix so each cell in the 2D array represents a well
-    # Pivot all replicates into a wide format (rows B-G x cols 2-11)
-    # We take the mean of technical replicates automatically via pivot_table
+    #Sorts the data into a well-like matrix that contains the mean nuclei counts of replicates.
     viability_matrix_raw = df_cp.pivot_table(index='Row', columns='Column', values='nuclei', aggfunc='mean')
+    viability_sd_raw = df_cp.pivot_table(index='Row', columns='Column', values='nuclei', aggfunc='std')
     
     # Ensure standard sorting (rows B-G, cols 2-11 as strings)
     row_order = ['B','C','D','E','F','G']
     col_order = [str(i) for i in range(2,12)]
     viability_matrix_raw = viability_matrix_raw.reindex(index=row_order, columns=col_order)
+    viability_sd_raw = viability_sd_raw.reindex(index=row_order, columns=col_order)
     
     # Normalize entire matrix to the vehicle (B2)
     vehicle_val = viability_matrix_raw.loc['B', '2']
     viability_matrix = viability_matrix_raw / vehicle_val
+    viability_sd_matrix = viability_sd_raw / vehicle_val
     logger.debug('Viability matrix calculated and normalized to B2.')
     
-    # Map concentrations to cols and rows (for labels)
     all_x_doses = np.insert(x_doses, 0, 0) # Add 0 for vehicle
     all_y_doses = np.insert(y_doses, 0, 0) # Add 0 for vehicle
     
-    # Map index/columns to concentrations
     conc_map_x = dict(zip(col_order, all_x_doses))
     conc_map_y = dict(zip(row_order, all_y_doses))
     
@@ -617,11 +655,9 @@ def run_synergy(title_name, x_drug, x_top_conc, x_dilution, y_drug, y_top_conc, 
     df_stats = df_cp.groupby('well')['nuclei'].agg(['mean', 'std']).reset_index()
     df_stats['normalized_mean'] = df_stats['mean'] / vehicle_val
     
-    # Map concentrations to the stats dataframe
     df_stats['Row Drug Concentration'] = df_stats['well'].str[0].map(conc_map_y)
     df_stats['Column Drug Concentration'] = df_stats['well'].str[1:].map(conc_map_x)
     
-    # Rename columns for final output
     df_stats = df_stats.rename(columns={
         'well': 'Well', 
         'mean': 'Mean', 
@@ -650,12 +686,11 @@ def run_synergy(title_name, x_drug, x_top_conc, x_dilution, y_drug, y_top_conc, 
     bliss_matrix = expected_matrix - viability_matrix
     logger.debug('Bliss scores calculated via vectorized outer product.')
 
-    # Setup output directories
+    #making a path for the output directory
     output_base = tb.get_output_base_dir(output_dir)
     synergy_output_dir = output_base / 'synergy_output'
     synergy_output_dir.mkdir(exist_ok=True)
     
-    # Save the detailed stats file
     stats_cols = ['Well', 'Mean', 'Standard Deviation', 'Normalized Mean', 'Row Drug Concentration', 'Column Drug Concentration']
     df_stats[stats_cols].to_csv(synergy_output_dir / f'{title_name}_synergy_stats.csv', index=False)
     logger.info(f'{title_name} synergy stats saved to {synergy_output_dir}')
@@ -675,6 +710,8 @@ def run_synergy(title_name, x_drug, x_top_conc, x_dilution, y_drug, y_top_conc, 
     bliss_out.to_csv(synergy_output_dir / f'{title_name}_synergy_BlissMatrix.csv')
     logger.info(f'{title_name} matrices saved.')
 
+
+    # Makes viability matrix, fitted matrix, calculates bliss scores and plots 3D surface plot.
     _save_fitted_synergy_surface(
         title_name=title_name,
         x_drug=x_drug,
@@ -682,6 +719,7 @@ def run_synergy(title_name, x_drug, x_top_conc, x_dilution, y_drug, y_top_conc, 
         x_dilution=x_dilution,
         y_dilution=y_dilution,
         viability_matrix=viability_matrix,
+        viability_sd_matrix=viability_sd_matrix,
         x_doses=all_x_doses,
         y_doses=all_y_doses,
         synergy_output_dir=synergy_output_dir,
@@ -692,6 +730,8 @@ def run_synergy(title_name, x_drug, x_top_conc, x_dilution, y_drug, y_top_conc, 
     # Rename raw counts for easier tracking
     tb.rename_counts(cp_csv, synergy_output_dir / f'{title_name}_synergy_counts.csv')
 
+
+# Compact plate-map helpers
 def _well_sort_key(well):
     row_order = {row: idx for idx, row in enumerate("ABCDEFGH")}
     text = str(well)
@@ -699,27 +739,46 @@ def _well_sort_key(well):
 
 
 def _assignment_text(assignments):
+    """Go through the assignments dictionary and return a string comprised of drug:concentration index for each drug-- organized as a list."""
     assignments = assignments or {}
-    parts = []
-    for drug in sorted(assignments, key=lambda value: int(str(value).removeprefix("d"))):
+    parts = [] #list that will contain drug and concentration index
+    for drug in sorted(assignments, key=_drug_sort_key):
         concentration = assignments[drug].get("concentration_index", "")
         parts.append(f"{drug}:c{concentration}")
     return ";".join(parts)
 
 
-def _code_drug_count(code):
+def _drug_sort_key(drug):
+    return int(str(drug).removeprefix("d"))
+
+
+def _code_to_indices(code):
+    """Makes a dictionary of drug code and concentration index"""
     if code in {"0", "control"}:
-        return 0
-    return len(str(code).split("+"))
+        return {}
+    indices = {}
+    for part in str(code).split("+"):
+        drug, concentration = part.split("c", 1)
+        indices[drug] = int(concentration)
+    return indices
+
+
+def _code_from_indices(x_code_drug, x_idx, y_code_drug, y_idx):
+    parts = []
+    if x_idx:
+        parts.append(f"{x_code_drug}c{x_idx}")
+    if y_idx:
+        parts.append(f"{y_code_drug}c{y_idx}")
+    return "+".join(parts) if parts else "control"
+
+
+def _code_drug_count(code):
+    """Returns number of drugs in a well code"""
+    return len(_code_to_indices(code))
 
 
 def _code_concentration_for_drug(code, drug):
-    if code in {"0", "control"}:
-        return 0
-    for part in str(code).split("+"):
-        if part.startswith(f"{drug}c"):
-            return int(part.split("c", 1)[1])
-    return 0
+    return _code_to_indices(code).get(drug, 0)
 
 
 def _dose_lookup(top_conc, dilution, max_index):
@@ -732,6 +791,7 @@ def _dose_lookup(top_conc, dilution, max_index):
     return lookup
 
 
+# Mapped plate-map execution path
 def _try_create_mapped_bliss_outputs(
     title_name,
     x_drug,
@@ -741,6 +801,7 @@ def _try_create_mapped_bliss_outputs(
     y_top_conc,
     y_dilution,
     grouped,
+    vehicle_val,
     synergy_output_dir,
     show_plot,
 ):
@@ -750,63 +811,54 @@ def _try_create_mapped_bliss_outputs(
         logger.warning("Mapped synergy plot skipped: no non-control codes were found.")
         return
 
+    #Loops non control codes through code through code_to_indices() and sorts drug by number after d using _drug_sort_key
     drugs = sorted(
         {
-            part.split("c", 1)[0]
+            drug
             for code in non_control["code"].astype(str)
-            for part in code.split("+")
+            for drug in _code_to_indices(code)
         },
-        key=lambda value: int(value.removeprefix("d")),
+        key=_drug_sort_key,
     )
+    #At least and only 2 drugs should be in the non control wells
     if len(drugs) != 2:
         logger.warning("Mapped synergy plot skipped: Bliss output requires exactly two drugs.")
         return
 
+    #Gets the concentration indexes of each drug
     x_code_drug, y_code_drug = drugs
     x_indices = sorted({0} | {_code_concentration_for_drug(code, x_code_drug) for code in non_control["code"]})
     y_indices = sorted({0} | {_code_concentration_for_drug(code, y_code_drug) for code in non_control["code"]})
     if not x_indices or not y_indices:
         logger.warning("Mapped synergy plot skipped: no concentration indices were found.")
         return
-
+    #Makes a theoretical matrix on all drug codes that should be in the plate map based on the indices.
+    #Does this to ensure bliss calculations can be carried out
     required_codes = {
-        "+".join(
-            part
-            for part in [
-                f"{x_code_drug}c{x_idx}" if x_idx else "",
-                f"{y_code_drug}c{y_idx}" if y_idx else "",
-            ]
-            if part
-        )
-        if x_idx or y_idx
-        else "control"
+        _code_from_indices(x_code_drug, x_idx, y_code_drug, y_idx)
         for y_idx in y_indices
         for x_idx in x_indices
     }
-    observed_codes = set(grouped["code"].astype(str))
-    missing = sorted(required_codes - observed_codes)
+    observed_codes = set(grouped["code"].astype(str))#All the codes in the plate map that will be used for comparison
+    missing = sorted(required_codes - observed_codes)#comparison
     if missing:
         logger.warning(
             "Mapped synergy plot skipped: codes do not form a complete Bliss grid. Missing: %s",
             ", ".join(missing),
         )
         return
-
+    #Make a dictionary of {code: mean}
     viability_lookup = dict(zip(grouped["code"], grouped["Normalized Mean"]))
+    viability_sd_lookup = dict(
+        zip(grouped["code"], grouped["Standard Deviation"] / vehicle_val)
+    )
+
+    #Loop through x indices and y indices and makes a combined(+) code that is stored in parts[]
     viability_matrix = pd.DataFrame(
         [
             [
                 viability_lookup[
-                    "+".join(
-                        part
-                        for part in [
-                            f"{x_code_drug}c{x_idx}" if x_idx else "",
-                            f"{y_code_drug}c{y_idx}" if y_idx else "",
-                        ]
-                        if part
-                    )
-                    if x_idx or y_idx
-                    else "control"
+                    _code_from_indices(x_code_drug, x_idx, y_code_drug, y_idx)
                 ]
                 for x_idx in x_indices
             ]
@@ -815,7 +867,20 @@ def _try_create_mapped_bliss_outputs(
         index=y_indices,
         columns=x_indices,
     )
-
+    viability_sd_matrix = pd.DataFrame(
+        [
+            [
+                viability_sd_lookup[
+                    _code_from_indices(x_code_drug, x_idx, y_code_drug, y_idx)
+                ]
+                for x_idx in x_indices
+            ]
+            for y_idx in y_indices
+        ],
+        index=y_indices,
+        columns=x_indices,
+    )
+    #Takes the single drug row and column and makes a expected matrix for bliss
     drug_x_alone = viability_matrix.loc[0].values
     drug_y_alone = viability_matrix[0].values
     expected_matrix = pd.DataFrame(
@@ -825,9 +890,11 @@ def _try_create_mapped_bliss_outputs(
     )
     bliss_matrix = expected_matrix - viability_matrix
 
+    
     x_dose_lookup = _dose_lookup(x_top_conc, x_dilution, max(x_indices))
     y_dose_lookup = _dose_lookup(y_top_conc, y_dilution, max(y_indices))
 
+    #Matrix setup for viability csv output
     viability_out = viability_matrix.copy()
     viability_out.index = [y_dose_lookup[idx] for idx in viability_out.index]
     viability_out.columns = [x_dose_lookup[idx] for idx in viability_out.columns]
@@ -843,6 +910,8 @@ def _try_create_mapped_bliss_outputs(
 
     x_vals = np.array([x_dose_lookup[idx] for idx in x_indices], dtype=float)
     y_vals = np.array([y_dose_lookup[idx] for idx in y_indices], dtype=float)
+    
+    #Plate Map information is now fit for run_synergy()
     try:
         _save_fitted_synergy_surface(
             title_name=title_name,
@@ -851,6 +920,7 @@ def _try_create_mapped_bliss_outputs(
             x_dilution=x_dilution,
             y_dilution=y_dilution,
             viability_matrix=viability_matrix,
+            viability_sd_matrix=viability_sd_matrix,
             x_doses=x_vals,
             y_doses=y_vals,
             synergy_output_dir=synergy_output_dir,
@@ -877,22 +947,24 @@ def _run_synergy_from_plate_map(
     """Run synergy analysis using compact synergy-map codes."""
     from . import synergy_interactive_map
 
+    #merge the CellProfiler counts with the synergy map data frame.
     plate_map = synergy_interactive_map.load_synergy_map(plate_map_file)
     df = df_cp.merge(plate_map, on="well", how="left", validate="many_to_one")
     if df["code"].isna().any():
         missing_wells = df.loc[df["code"].isna(), "well"].tolist()
         raise ValueError(f"Counts contain wells not present in synergy map: {missing_wells}")
-
+    #Remove any wells that are not assigned to a code 
     df = df[df["code"].astype(str).ne("0")].copy()
     if df.empty:
         raise ValueError("Synergy map does not assign any wells for analysis.")
     if not (df["code"] == "control").any():
         raise ValueError("Synergy map must include at least one control well.")
-
+    #Normalization calculations.
     vehicle_val = df.loc[df["code"] == "control", "nuclei"].mean()
     if not np.isfinite(vehicle_val) or vehicle_val == 0:
         raise ValueError("Synergy control mean must be finite and non-zero.")
     df["normalized_nuclei"] = df["nuclei"] / vehicle_val
+    # .apply sends one value at a time to the helper function
     df["assignment_text"] = df["assignments"].apply(_assignment_text)
     df["drug_count"] = df["code"].apply(_code_drug_count)
 
@@ -900,6 +972,7 @@ def _run_synergy_from_plate_map(
     synergy_output_dir = output_base / "synergy_output"
     synergy_output_dir.mkdir(exist_ok=True)
 
+    #Provvides summary statistics for counts of wells with same code
     grouped = (
         df.groupby("code", sort=False)
         .agg(
@@ -913,6 +986,7 @@ def _run_synergy_from_plate_map(
         )
         .reset_index()
     )
+    #Making the dose grouped stats csv
     max_column_index = int(grouped["code"].apply(lambda code: _code_concentration_for_drug(code, "d1")).max())
     max_row_index = int(grouped["code"].apply(lambda code: _code_concentration_for_drug(code, "d2")).max())
     column_dose_lookup = _dose_lookup(x_top_conc, x_dilution, max_column_index)
@@ -923,6 +997,7 @@ def _run_synergy_from_plate_map(
     grouped["Row Drug Concentration"] = grouped["code"].apply(
         lambda code: row_dose_lookup[_code_concentration_for_drug(code, "d2")]
     )
+    #Adds two more elements
     grouped = grouped[
         [
             "Well(s)",
@@ -962,6 +1037,7 @@ def _run_synergy_from_plate_map(
         y_top_conc=y_top_conc,
         y_dilution=y_dilution,
         grouped=grouped,
+        vehicle_val=vehicle_val,
         synergy_output_dir=synergy_output_dir,
         show_plot=show_plot,
     )
