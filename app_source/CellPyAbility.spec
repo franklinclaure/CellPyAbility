@@ -27,6 +27,7 @@ a = Analysis(
         'cellpyability.simple_analysis',
         'cellpyability.GDA_interactive_map',
         'cellpyability.synergy_interactive_map',
+        'matplotlib.backends.backend_tkagg',
     ],
     hookspath=[],
     hooksconfig={},

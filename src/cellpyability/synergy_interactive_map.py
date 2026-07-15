@@ -20,6 +20,7 @@ from cellpyability.toolbox import (
     ROWS,
     build_plate_dataframe,
     plate_wells,
+    prepare_interactive_matplotlib_backend,
 )
 
 MAP_COLUMNS = ["well", "row", "column", "control", "assignments"]
@@ -131,6 +132,8 @@ def load_synergy_map(input_csv: str | Path) -> pd.DataFrame:
 
 def launch_synergy_map_matplotlib(output_csv: str | Path | None = None) -> None:
     """Launch the interactive synergy plate-map editor."""
+    prepare_interactive_matplotlib_backend()
+
     from matplotlib import patheffects as path_effects
     import matplotlib.pyplot as plt
     from matplotlib.patches import Rectangle

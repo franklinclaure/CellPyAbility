@@ -19,6 +19,7 @@ from cellpyability.toolbox import (
     ROWS,
     build_plate_dataframe,
     plate_wells,
+    prepare_interactive_matplotlib_backend,
     split_well,
 )
 
@@ -217,6 +218,8 @@ def validate_plate_map(df: pd.DataFrame) -> None:
 
 def launch_plate_map_matplotlib(output_csv: str | Path | None = None) -> None:
     """Launch the default Matplotlib plate-map editor."""
+    prepare_interactive_matplotlib_backend()
+
     from matplotlib import patheffects as path_effects
     import matplotlib.pyplot as plt
     from matplotlib.patches import Rectangle

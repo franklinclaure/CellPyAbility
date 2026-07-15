@@ -68,6 +68,24 @@ def build_plate_dataframe(
     return pd.DataFrame(records, columns=columns)
 
 
+def prepare_interactive_matplotlib_backend() -> None:
+    """Ensure Matplotlib can open the interactive plate-map editor window."""
+    if os.environ.get("MPLBACKEND", "").lower() == "agg":
+        os.environ.pop("MPLBACKEND", None)
+
+    import matplotlib
+
+    backend = matplotlib.get_backend().lower()
+    if backend in {"agg", "pdf", "ps", "svg", "template"} or backend.endswith("backend_agg"):
+        try:
+            matplotlib.use("TkAgg", force=True)
+        except Exception as error:
+            raise RuntimeError(
+                "The plate-map editor needs an interactive Matplotlib backend. "
+                "Unset MPLBACKEND=Agg or install Tk support for Matplotlib."
+            ) from error
+
+
 
 
 
