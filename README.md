@@ -91,7 +91,7 @@ Navigate to the bottom of the release notes and download the `.zip` file for you
 ### Test Data
 - Download the [example GDA images](https://github.com/bindralab/CellPyAbility/tree/main/example/example_gda)
 - Download the [example synergy images](https://github.com/bindralab/CellPyAbility/tree/main/example/example_synergy)
-- Compare outputs to [expected outputs](https://github.com/bindralab/CellPyAbility/tree/main/example/example_expected_outputs)
+- Compare outputs to [expected outputs](https://github.com/bindralab/CellPyAbility/tree/main/example/v1_example_expected_outputs)
 
 ## Abstract
 
@@ -106,16 +106,17 @@ We present CellPyAbility, a Python-based suite that automates image processing, 
 
 Reading the [protocols](protocol.pdf) first may aid in understanding the default data requirements.
 
-- Only the inner 60 wells of a 96-well plate (B-G, 2-11) should be used
+- Only the inner 60 wells of a 96-well plate (B-G, 2-11) should be used experimentally **unless a plate map is uploaded, in which case all wells can be used**
 
 - Image file names must contain their corresponding well
   - B2, ImageB2, DAPI-B2-(362), etc. for the image file of the B2 well in the 96-well plate
 
 - The GDA module requires a directory of 60 images 
   - B-D: Cell Line A in triplicate | E-G: Cell Line B in triplicate
+- The GDA module cannot accept experimental setups that have more than 5 drugs
 
 - The synergy module requires a directory of 180 images
-  - Wells of the same name (B2, ...) across three plates are triplicates
+  - Wells of the same name (B2, ...) across three plates are triplicates 
 
 ### Code-Free Application Requirements
 
@@ -129,14 +130,16 @@ The CellPyAbility CLI provides a modern, scriptable interface for automated work
 
 ### Basic Usage
 
-The CLI provides three subcommands corresponding to the three analysis modules:
+The CLI provides analysis modules, map builders, and batch automation:
 
 ```bash
-cellpyability --help          # Show available modules
-cellpyability gda --help      # Show GDA module options
-cellpyability synergy --help  # Show synergy module options  
-cellpyability simple --help   # Show simple module options
-cellpyability plate-map --help # Create or validate reusable plate map CSVs
+cellpyability --help             # Show available modules
+cellpyability gda --help         # Show GDA module options
+cellpyability synergy --help     # Show synergy module options
+cellpyability simple --help      # Show simple module options
+cellpyability gda-map --help     # Create or validate reusable GDA plate map CSVs
+cellpyability synergy-map --help # Create compact synergy map CSVs
+cellpyability batch --help       # Run analyses from a batch CSV
 ```
 
 ### GDA Module
@@ -151,7 +154,7 @@ cellpyability gda \
   --top-conc 0.000001 \
   --dilution 3 \
   --image-dir /path/to/images \
-  --plate-map /path/to/plate_map.csv \
+  --plate-map /path/to/plate_map.csv \ # Optional
   --output-dir /path/to/results  # Optional
 ```
 
@@ -165,13 +168,16 @@ cellpyability gda \
 - `-n, --no-plot`: (Optional) Skip displaying plot window
 - `-f, --counts-file`: (Optional) Use pre-existing counts CSV for testing
 - `-o, --output-dir`: (Optional) Custom output directory (default: `./cellpyability_output/`)
-- `--plate-map`: (Optional) Use a reusable plate map CSV for custom genotype, vehicle, gradient, and technical replicate assignments
+- `-m, --plate-map`: (Optional) Use a reusable plate map CSV for custom genotype, vehicle, gradient, and technical replicate assignments
 
 **Outputs** (saved to `./cellpyability_output/gda_output/` by default):
 - `{title}_gda_Stats.csv`: Dose-response statistics
-- `{title}_gda_ViabilityMatrix.csv`: Normalized viability matrix
+- `{title}_gda_ViabilityMatrix.csv` or `{title}_gda_bywell.csv`: Normalized viability matrix or viability information by well if you have a plate map
 - `{title}_gda_plot.png`: Publication-ready dose-response plot
 - `{title}_gda_counts.csv`: Raw nuclei counts
+- `{title}_gda_fitted_params.csv`: Fitted parameters that yielded the selected logistic plot
+
+
 
 ### Synergy Module
 
@@ -202,6 +208,23 @@ cellpyability synergy \
 - `-n, --no-plot`: (Optional) Skip displaying plot
 - `-f, --counts-file`: (Optional) Use pre-existing counts CSV
 - `-o, --output-dir`: (Optional) Custom output directory (default: `./cellpyability_output/`)
+- `-m, --plate-map`: (Optional) Use a compact synergy map CSV for code-based grouped analysis
+
+**Outputs** (saved to `./cellpyability_output/synergy_output/` by default):
+*Slices refers to the individual lines within a well either that are fitted either horizontally or vertically depending on which has more data points to fit. 
+
+- `{title}_synergy_ViabilityMatrix.csv`: Normalized viability matrix
+- `{title}_synergy_Fitted ViabilityMatrix.csv`: Matrix with new fitted values
+- `{title}_synergy_Bliss_Matrix.csv`: Bliss scores that represent expected viability - actual
+- `{title}_synergy_FittedBlissMatrix.csv`: Matrix of bliss scores calculated after fitting each slice to a 5Pl or 4PL
+- `{title}_synergy_counts.csv`: Cell Profiler outputted counts file
+- `{title}_synergy_fitted_params.csv`: Fitted parameters that yielded the selected logistic plot for each slice
+- `{title}_synergy_curve_fits.PNG`: Plotted Curves of individual slices that are used for 3D surface plot
+- `{title}_synergy_plot.html`: 3D surface plot
+- `{title}_synergy_stats.csv`: csv of summary statistics
+
+
+
 
 ### Simple Module
 
@@ -223,22 +246,22 @@ cellpyability simple \
 **Outputs** (saved to `./cellpyability_output/simple_output/` by default):
 - `{title}_simple_CountMatrix.csv`: 96-well nuclei count matrix
 
-### Plate Map Builder
+### GDA Plate Map Builder
 
 Create a reusable CSV describing a plate layout before analysis:
 
 ```bash
-# Open the graphical plate-map editor
-cellpyability plate-map --output my_plate_map.csv
+# Open the graphical GDA plate-map editor
+cellpyability gda-map --output my_plate_map.csv
 
 # Or create a CSV matching the current default GDA layout
-cellpyability plate-map --default --output default_gda_plate_map.csv
+cellpyability gda-map --default --output default_gda_plate_map.csv
 
 # Validate a plate map before using it in a workflow
-cellpyability plate-map --validate my_plate_map.csv
+cellpyability gda-map --validate my_plate_map.csv
 ```
 
-The editor shows a 96-well layout. Users can drag-select wells and assign:
+The editor shows a 96-well layout. Users can drag-select or click on wells and assign:
 - genotype or cell line
 - vehicle controls
 - drug gradients
@@ -256,6 +279,32 @@ The default GDA plate-map template contains one row per well with these columns:
 - `replicate_group`, `replicate_index`: technical replicate metadata
 - `is_vehicle`: true/false vehicle marker
 - `notes`: optional user notes
+
+### Synergy Plate Map Builder
+
+Create a compact CSV describing a synergy plate layout before analysis:
+
+```bash
+# Open the graphical synergy plate-map editor
+cellpyability synergy-map --output my_synergy_map.csv
+```
+
+The editor shows a 96-well layout. Users can drag-select or click on wells and assign:
+- control wells
+- drug concentration positions
+- one or more drug assignments per well
+- drug direction (`horizontal` or `vertical`)
+
+The synergy map is saved as an 8 row x 12 column compact CSV matching the 96-well plate layout. Each cell contains one compact code:
+- `0`: unassigned well
+- `control`: control well
+- `d1c1`: drug 1 at concentration index 1
+- `d2c3`: drug 2 at concentration index 3
+- `d1c1+d2c3`: combination well with drug 1 concentration index 1 and drug 2 concentration index 3
+
+Use the saved CSV with the synergy module through `-m, --plate-map`.
+
+
 
 ### Batch Module
 
@@ -283,8 +332,13 @@ The configuration file should contain a `module` column to specify the analysis 
 | `title` | Experiment title |
 | `upper` | (GDA) Name for cell condition in rows B-D |
 | `lower` | (GDA) Name for cell condition in rows E-G |
-| `conc` | (GDA) Top drug concentration in molar |
-| `dil` | (GDA) Dilution factor |
+| `plate_map` | (GDA) Optional plate map CSV for custom genotype, vehicle, gradient, and replicate assignments |
+| `drug_name1` | (GDA plate-map) Name for drug 1 |
+| `top_conc1` | (GDA) Top concentration in molar for standard GDA or drug 1 |
+| `dilution1` | (GDA) Dilution factor for standard GDA or drug 1 |
+| `drug_name2`-`drug_name5` | (GDA plate-map) Optional Names for drugs 2-5 |
+| `top_conc2`-`top_conc5` | (GDA plate-map) Optional Top concentrations in molar for drugs 2-5 |
+| `dilution2`-`dilution5` | (GDA plate-map) Optional Dilution factors for drugs 2-5 |
 | `xdrug` | (Synergy) Name of horizontal gradient drug |
 | `xconc` | (Synergy) Horizontal top concentration |
 | `xdil` | (Synergy) Horizontal dilution factor |
@@ -328,7 +382,9 @@ xattr -dr com.apple.quarantine /path/to/extracted/CellPyAbility_Folder
 
 ```
 
-Once running, a GUI prompts the user to choose from the three modules or the batch feature. Hovering over each button will give a description of its uses:
+Once running, a GUI prompts the user to choose from the three modules,the batch feature, or the plate map builder. Hovering over each button will give a description of its uses:
+
+- **Plate Map**: Directs you to an option to make either a synergy or gda plate map.
 
 - **GDA**: dose-response analysis of two cell lines in response to one treatment
 
@@ -348,6 +404,7 @@ After selecting a module, the application will look for CellProfiler in the defa
 If CellProfiler cannot be found, the user will be prompted to input the path to the CellProfiler file via a dialog box. The path is saved to a .txt file within the directory for future reference, so subsequent runs will proceed directly to the next step.
 
 A GUI specific to each module will prompt the user for experimental details. Using the GDA module as an example:
+
 - title of the experiment (e.g. 20250101_CellLine_Drug)
 
 - name of the cell condition in rows B-D (e.g. Cell Line Wildtype)
@@ -360,6 +417,9 @@ A GUI specific to each module will prompt the user for experimental details. Usi
 
 - a file browser to select the directory containing the 60 images
 
+**Note that uploading a plate map will automatically adjust the number of input boxes based on the number of drugs. It will also adjust the prompts to account for the fact that well positions are determined by the map. **
+
+
 After submitting the GUI, a terminal window will open to track CellProfiler's image analysis progress. Once all images are counted, subsequent analysis is almost instant. All figures and tabular results will be in a subdirectory named after the module (e.g. gda_output). See [Example Outputs](#example-outputs).
 
 A small GUI window will then prompt the user if they would like to run another experiment. If "yes", the initial module selection GUI will prompt the user again. If "no", the application will close.
@@ -369,34 +429,59 @@ A log file with detailed logging is written to the directory. If the application
 The source code for the GUI applications can be found in the [app_source](./app_source/) directory.
 
 ## Example Outputs
+
+### Plate Map
+The plate map module allows you to utilize CellPyAbility beyond the traditonal experimental formats for gda and synergy analyses. Note: Traditional experimental setups are still accepted by the Plate Map.
+
+
+- [GDA Plate Map](example/v2_example_expected_outputs/test_gda_PlateMap.png)
+
+- [Synergy Plate Map](example/v2_example_expected_outputs/test_synergy_PlateMap.png)
+
 ### GDA Module
-The GDA module outputs three tabular files with increasing degrees of analysis:
-- [raw nuclei counts](example/example_expected_outputs/test_gda_counts.csv)
+The GDA module outputs tabular files with increasing degrees of analysis:
+- [raw nuclei counts](example/v1_example_expected_outputs/test_gda_counts.csv)
 
-- [normalized cell viability matrix](example/example_expected_outputs/test_gda_ViabilityMatrix.csv)
+- [normalized cell viability matrix](example/v1_example_expected_outputs/test_gda_ViabilityMatrix.csv)
 
-- [cell viability statistics](example/example_expected_outputs/test_gda_Stats.csv)
+- [plate-map by-well viability information](example/v2_example_expected_outputs/test_gda_bywell.csv)
+
+- [cell viability statistics](example/v1_example_expected_outputs/test_gda_Stats.csv)
+
+- [fitted logistic model parameters](example/v2_example_expected_outputs/test_gda_fitted_params.csv)
 
 Additionally, the script generates a plot with 5-parameter logistic curves:
 
-![GDA plot](example/example_expected_outputs/test_gda_plot.png)
+![GDA plot](example/v1_example_expected_outputs/test_gda_plot.png)
 ### Synergy Module
-The synergy module outputs four tabular files:
-- [raw nuclei counts](example/example_expected_outputs/test_synergy_counts.csv)
+The synergy module outputs tabular files for viability, fitted values, synergy scoring, and model diagnostics:
+- [raw nuclei counts](example/v2_example_expected_outputs/test_synergy_counts.csv)
 
-- [normalized cell viability matrix](example/example_expected_outputs/test_synergy_ViabilityMatrix.csv)
+- [normalized cell viability matrix](example/v1_example_expected_outputs/test_synergy_ViabilityMatrix.csv)
 
-- [cell viability statistics](example/example_expected_outputs/test_synergy_stats.csv)
+- [fitted viability matrix](example/v2_example_expected_outputs/test_synergy_FittedViabilityMatrix.csv)
 
-- [Bliss synergy matrix](example/example_expected_outputs/test_synergy_BlissMatrix.csv)
+- [Bliss synergy matrix](example/v1_example_expected_outputs/test_synergy_BlissMatrix.csv)
 
-Additionally, the script generates an interactive [3D surface map](example/example_expected_outputs/test_synergy_plot.html) in HTML with synergy as heat:
+- [fitted Bliss matrix](example/v2_example_expected_outputs/test_synergy_FittedBlissMatrix.csv)
 
-![synergy plot](example/example_expected_outputs/test_synergy_plot_static.png)
+- [fitted logistic model parameters](example/v2_example_expected_outputs/test_synergy_fitted_params.csv)
+
+- [cell viability summary statistics](example/v1_example_expected_outputs/test_synergy_stats.csv)
+
+Additionally, the script generates plots for individual fitted slices and the final synergy surface:
+
+- [curve fit plots](example/v2_example_expected_outputs/test_synergy_curve_fits.png)
+
+- [interactive 3D surface map](example/v1_example_expected_outputs/test_synergy_plot.html)
+
+![synergy plot](example/v2_example_expected_outputs/test_synergy_plot_static.png)
 
 ### Simple Module
 Finally, the simple module outputs nuclei counts in a 96-well matrix format. This offers maximum flexibility but does not provide any analysis.
-- [count matrix](example/example_expected_outputs/test_simple_CountMatrix.csv)
+- [count matrix](tests/data/test_simple_CountMatrix.csv)
+
+
 
 ## Modifying the CellProfiler Pipeline
 
@@ -426,17 +511,17 @@ pip install -e .
 python tests/test_module_outputs.py
 ```
 
-The test suite validates that each module (GDA, Synergy, Simple) produces output matching expected results when processing test data. All tests should pass before using CellPyAbility for your experiments.
+The test suite validates that each module (GDA, Synergy, Simple) produces output matching expected results when processing test data. It also checks fitted model parameter tables, fitted synergy matrices, and plate-map analysis paths. All tests should pass before using CellPyAbility for your experiments.
 
 **Test Results:**
-- ✅ GDA Module: Verifies dose-response analysis accuracy
-- ✅ Synergy Module: Verifies drug combination and Bliss independence calculations  
+- ✅ GDA Module: Verifies dose-response analysis accuracy, fitted parameters, and GDA plate-map outputs
+- ✅ Synergy Module: Verifies drug combination analysis, Bliss independence calculations, fitted matrices, fitted parameters, and synergy plate-map outputs
 - ✅ Simple Module: Verifies nuclei count matrix generation
 
 Test data is located in `tests/data/` and includes:
 - `test_gda_counts.csv`: Pre-counted nuclei for gda test
 - `test_synergy_counts.csv`: Pre-counted nuclei for synergy test
-- `test_*_Stats.csv`: Expected analysis outputs for validation
+- `test_*_Stats.csv` and `test_*_BlissMatrix.csv`: Expected analysis outputs for validation
 
 ### Manual Testing with Example Data
 
@@ -460,13 +545,13 @@ For manual verification, the `example/` directory contains real experimental dat
 
 3. **Compare Your Results:**
    - Your outputs in `src/cellpyability/gda_output/`
-   - Expected outputs in `example/example_expected_outputs/`
+   - Expected outputs in `example/v1_example_expected_outputs/`
    - [Test parameters](example/example_params.txt) used to generate examples
 
 **Available Example Datasets:**
 - [GDA test data](example/example_gda/): 60 well images for dose-response analysis
 - [Synergy test data](example/example_synergy/): 180 well images for drug combination analysis
-- [Expected outputs](example/example_expected_outputs/): Reference results for validation
+- [Expected outputs](example/v1_example_expected_outputs/): Reference results for validation
 
 This dual approach ensures both automated validation (for development/CI) and manual verification (to confirm your specific environment is working correctly).
 
