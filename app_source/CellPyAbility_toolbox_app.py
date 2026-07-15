@@ -22,10 +22,21 @@ def cellpyability_logger():
     # Log all messages
     logger.setLevel(logging.DEBUG)
 
-    # Create a log.log file with all messages
-    log_file = Path(sys.executable).resolve().parent / "log.log"
+    if logger.hasHandlers():
+        return logger
 
-    fh = logging.FileHandler(log_file)
+    # Create a log.log file with all messages
+    if getattr(sys, 'frozen', False):
+        log_dir = Path(sys.executable).resolve().parent
+    else:
+        log_dir = Path(__file__).resolve().parent
+    log_file = log_dir / "log.log"
+
+    try:
+        fh = logging.FileHandler(log_file)
+    except (PermissionError, OSError):
+        log_file = Path.cwd() / "log.log"
+        fh = logging.FileHandler(log_file)
     fh.setLevel(logging.DEBUG)
 
     # Only log >= INFO messages in the terminal
@@ -41,7 +52,7 @@ def cellpyability_logger():
     logger.addHandler(fh)
     logger.addHandler(ch)
 
-    logger.debug('Logger setup complete.')
+    logger.debug(f'Logger setup complete. Logging to: {log_file}')
     return logger
 
 # Define logger so it can be referenced in later functions
@@ -55,7 +66,7 @@ def establish_base():
         base_dir = Path(sys.executable).resolve().parent
     else:
         # Running as a .py script
-        base_dir = Path(__file__).resolve().parent
+        base_dir = Path(__file__).resolve().parent.parent
 
     if not base_dir.exists():
         logger.critical(f'Base directory {base_dir} does not exist.')

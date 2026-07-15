@@ -15,6 +15,22 @@ def run():
         root = tk.Tk()
         root.title('Simple input')
 
+        plate_map_file = ''
+
+        def select_plate_map():
+            nonlocal plate_map_file
+            selected = filedialog.askopenfilename(
+                title="Select Plate Map CSV",
+                filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
+            )
+            if selected:
+                plate_map_file = selected
+                plate_map_label.config(text=Path(selected).name)
+
+        ttk.Button(root, text='Upload a Plate Map', command=select_plate_map).pack()
+        plate_map_label = ttk.Label(root, text='No plate map selected')
+        plate_map_label.pack()
+
         ttk.Label(root, text='Experiment title:').pack()
         title_entry = ttk.Entry(root)
         title_entry.pack()
@@ -23,15 +39,21 @@ def run():
 
         def select_dir():
             nonlocal image_dir
-            image_dir = filedialog.askdirectory()
+            selected = filedialog.askdirectory()
+            if selected:
+                image_dir = selected
+                image_dir_label.config(text=Path(selected).name)
 
         ttk.Button(root, text='Select images…', command=select_dir).pack()
+        image_dir_label = ttk.Label(root, text='No image directory selected')
+        image_dir_label.pack()
 
         inputs = {}
 
         def on_submit():
             inputs['title'] = title_entry.get().strip()
             inputs['image_dir'] = image_dir
+            inputs['plate_map_file'] = plate_map_file
             root.destroy()
 
         ttk.Button(root, text='Submit', command=on_submit).pack()

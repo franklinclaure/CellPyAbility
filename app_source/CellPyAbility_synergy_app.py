@@ -13,13 +13,31 @@ from cellpyability.toolbox import logger
 def run():
     def synergy_gui():
         image_dir = ''
+        plate_map_file = ''
 
         def select_image_dir():
             nonlocal image_dir
-            image_dir = filedialog.askdirectory()
+            selected = filedialog.askdirectory()
+            if selected:
+                image_dir = selected
+                image_dir_label.config(text=Path(selected).name)
+
+        def select_plate_map():
+            nonlocal plate_map_file
+            selected = filedialog.askopenfilename(
+                title="Select Plate Map CSV",
+                filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
+            )
+            if selected:
+                plate_map_file = selected
+                plate_map_label.config(text=Path(selected).name)
 
         root = tk.Tk()
         root.title('synergy input')
+
+        ttk.Button(root, text='Upload a Plate Map', command=select_plate_map).pack()
+        plate_map_label = ttk.Label(root, text='No plate map selected')
+        plate_map_label.pack()
 
         entries = {}
         fields = [
@@ -38,6 +56,8 @@ def run():
             entries[key] = entry
 
         ttk.Button(root, text='Select Image Directory', command=select_image_dir).pack()
+        image_dir_label = ttk.Label(root, text='No image directory selected')
+        image_dir_label.pack()
 
         gui_inputs = {}
 
@@ -45,6 +65,7 @@ def run():
             for key, entry in entries.items():
                 gui_inputs[key] = entry.get().strip()
             gui_inputs['image_dir'] = image_dir
+            gui_inputs['plate_map_file'] = plate_map_file
             root.destroy()
 
         ttk.Button(root, text='Submit', command=submit).pack()
@@ -73,7 +94,8 @@ def run():
         y_dilution=float(gui_inputs['y_dilution']),
         image_dir=gui_inputs['image_dir'],
         show_plot=True,
-        output_dir=str(output_base)
+        output_dir=str(output_base),
+        plate_map_file=gui_inputs.get('plate_map_file') or None
     )
 
 

@@ -3,7 +3,7 @@
 import sys
 import tkinter as tk
 from pathlib import Path
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 
 import CellPyAbility_toolbox_app as tb_gui
 from cellpyability import cli
@@ -12,18 +12,45 @@ from cellpyability.toolbox import logger
 
 def run():
     def batch_gui():
-        # Hide the main root window for now
         root = tk.Tk()
-        root.withdraw()
+        root.title('Batch input')
+        config_csv = ''
+        plate_map_file = ''
 
-        # Ask the user to select the batch configuration CSV
-        csv_file = filedialog.askopenfilename(
-            title="Select Batch Configuration CSV",
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
-        )
-        
-        root.destroy()
-        return csv_file
+        def select_plate_map():
+            nonlocal plate_map_file
+            selected = filedialog.askopenfilename(
+                title="Select Plate Map CSV",
+                filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
+            )
+            if selected:
+                plate_map_file = selected
+                plate_map_label.config(text=Path(selected).name)
+
+        def select_config_csv():
+            nonlocal config_csv
+            selected = filedialog.askopenfilename(
+                title="Select Batch Configuration CSV",
+                filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
+            )
+            if selected:
+                config_csv = selected
+                config_label.config(text=Path(selected).name)
+
+        def submit():
+            root.destroy()
+
+        ttk.Button(root, text='Upload a Plate Map', command=select_plate_map).pack()
+        plate_map_label = ttk.Label(root, text='No plate map selected')
+        plate_map_label.pack()
+
+        ttk.Button(root, text='Select Batch Configuration CSV', command=select_config_csv).pack()
+        config_label = ttk.Label(root, text='No batch CSV selected')
+        config_label.pack()
+
+        ttk.Button(root, text='Submit', command=submit).pack()
+        root.mainloop()
+        return config_csv
 
     config_csv = batch_gui()
     if not config_csv:
