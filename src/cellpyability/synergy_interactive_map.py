@@ -15,37 +15,28 @@ from pathlib import Path
 
 import pandas as pd
 
+from cellpyability.toolbox import (
+    COLUMNS,
+    ROWS,
+    build_plate_dataframe,
+    plate_wells,
+)
 
-ROWS = ["A", "B", "C", "D", "E", "F", "G", "H"]
-COLUMNS = [str(idx) for idx in range(1, 13)]
 MAP_COLUMNS = ["well", "row", "column", "control", "assignments"]
-
-
-def inner_wells() -> list[str]:
-    """Return 96-well plate coordinates in plate order."""
-    return [f"{row}{column}" for row in ROWS for column in COLUMNS]
-
-
-def split_well(well: str) -> tuple[str, str]:
-    """Split a well like A12 into row and column labels."""
-    return well[0], well[1:]
 
 
 def blank_synergy_map() -> pd.DataFrame:
     """Create an empty 96-well synergy map."""
-    records = []
-    for row in ROWS:
-        for column in COLUMNS:
-            records.append(
-                {
-                    "well": f"{row}{column}",
-                    "row": row,
-                    "column": int(column),
-                    "control": False,
-                    "assignments": {},
-                }
-            )
-    return pd.DataFrame(records, columns=MAP_COLUMNS)
+    return build_plate_dataframe(
+        MAP_COLUMNS,
+        lambda well, row, column: {
+            "well": well,
+            "row": row,
+            "column": int(column),
+            "control": False,
+            "assignments": {},
+        },
+    )
 
 
 def compact_code(row: pd.Series) -> str:
@@ -446,6 +437,7 @@ def launch_synergy_map_matplotlib(output_csv: str | Path | None = None) -> None:
             state["undo_stack"].pop(0)
 
     def undo_last(event=None) -> None:
+        """Restore the live plate-map DataFrame from the most recent undo snapshot."""
         if not state["undo_stack"]:
             set_status("Nothing to undo.")
             return
@@ -456,6 +448,7 @@ def launch_synergy_map_matplotlib(output_csv: str | Path | None = None) -> None:
         redraw_plate()
 
     def assign_gradient(event=None) -> None:
+        """Write the selected drug, gradient axis, and concentration index into selected DataFrame rows."""
         if not selected_wells:
             set_status("Highlight one or more wells first.")
             return
@@ -480,6 +473,7 @@ def launch_synergy_map_matplotlib(output_csv: str | Path | None = None) -> None:
         redraw_plate()
 
     def assign_control(event=None) -> None:
+        """Mark selected DataFrame rows as controls and remove any drug assignments."""
         if not selected_wells:
             set_status("Highlight one or more wells first.")
             return
@@ -495,6 +489,7 @@ def launch_synergy_map_matplotlib(output_csv: str | Path | None = None) -> None:
         redraw_plate()
 
     def clear_highlighted(event=None) -> None:
+        """Clear control flags and drug assignments from selected DataFrame rows."""
         if not selected_wells:
             set_status("Highlight one or more wells first.")
             return
@@ -510,6 +505,7 @@ def launch_synergy_map_matplotlib(output_csv: str | Path | None = None) -> None:
         redraw_plate()
 
     def reset_all(event=None) -> None:
+        """Replace the live plate-map DataFrame with a new blank synergy map after confirmation."""
         if not state["confirm_reset"]:
             state["confirm_reset"] = True
             set_status("Click Reset All again to confirm clearing every well.")
@@ -528,6 +524,7 @@ def launch_synergy_map_matplotlib(output_csv: str | Path | None = None) -> None:
         return cleaned or "synergy_map"
 
     def save_layout(event=None) -> None:
+        """Saves the format of the plate map for repeat use"""
         output_dir.mkdir(parents=True, exist_ok=True)
         path = (output_dir / f"{sanitized_layout_name()}.csv").expanduser().resolve()
         save_compact_grid(data["df"], path)

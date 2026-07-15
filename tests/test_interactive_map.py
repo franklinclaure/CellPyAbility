@@ -9,23 +9,23 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from cellpyability import interactive_map, synergy_interactive_map
+from cellpyability import GDA_interactive_map, synergy_interactive_map
 
 
 def test_default_gda_plate_map_round_trips(tmp_path):
     output_csv = tmp_path / "plate_map.csv"
 
-    df = interactive_map.default_gda_plate_map(
+    df = GDA_interactive_map.default_gda_plate_map(
         genotype_1="Cell Line A",
         genotype_2="Cell Line B",
         drug="Drug X",
     )
-    saved = interactive_map.save_plate_map(df, output_csv)
-    loaded = interactive_map.load_plate_map(saved)
+    saved = GDA_interactive_map.save_plate_map(df, output_csv)
+    loaded = GDA_interactive_map.load_plate_map(saved)
 
     assert saved == output_csv.resolve()
-    assert loaded.shape == (96, len(interactive_map.PLATE_MAP_COLUMNS))
-    assert loaded["well"].tolist() == interactive_map.inner_wells()
+    assert loaded.shape == (96, len(GDA_interactive_map.PLATE_MAP_COLUMNS))
+    assert loaded["well"].tolist() == GDA_interactive_map.plate_wells()
 
     a2 = loaded[loaded["well"] == "A2"].iloc[0]
     b2 = loaded[loaded["well"] == "B2"].iloc[0]
@@ -44,12 +44,12 @@ def test_default_gda_plate_map_round_trips(tmp_path):
     assert e11["concentration_index"] == 9
 
 
-def test_validate_plate_map_requires_all_inner_wells():
-    df = interactive_map.default_gda_plate_map()
+def test_validate_plate_map_requires_all_supported_plate_wells():
+    df = GDA_interactive_map.default_gda_plate_map()
     df = df[df["well"] != "B2"]
 
     with pytest.raises(ValueError, match="exactly the 96 wells"):
-        interactive_map.validate_plate_map(df)
+        GDA_interactive_map.validate_plate_map(df)
 
 
 def test_load_compact_plate_map(tmp_path):
@@ -69,9 +69,9 @@ def test_load_compact_plate_map(tmp_path):
         )
     )
 
-    loaded = interactive_map.load_plate_map(compact)
+    loaded = GDA_interactive_map.load_plate_map(compact)
 
-    assert loaded.shape == (96, len(interactive_map.PLATE_MAP_COLUMNS))
+    assert loaded.shape == (96, len(GDA_interactive_map.PLATE_MAP_COLUMNS))
     assert loaded.loc[loaded["well"] == "A1", "genotype"].iloc[0] == ""
     assert loaded.loc[loaded["well"] == "A2", "genotype"].iloc[0] == "g1"
     assert loaded.loc[loaded["well"] == "A2", "treatment_type"].iloc[0] == "vehicle"
@@ -89,14 +89,14 @@ def test_load_compact_plate_map_rejects_invalid_code(tmp_path):
     compact.write_text("\n".join(rows))
 
     with pytest.raises(ValueError, match="Invalid compact plate-map code 'g3v' at A1"):
-        interactive_map.load_plate_map(compact)
+        GDA_interactive_map.load_plate_map(compact)
 
 
 def test_synergy_blank_map_saves_zero_compact_grid(tmp_path):
     df = synergy_interactive_map.blank_synergy_map()
 
     assert df.shape == (96, len(synergy_interactive_map.MAP_COLUMNS))
-    assert df["well"].tolist() == synergy_interactive_map.inner_wells()
+    assert df["well"].tolist() == synergy_interactive_map.plate_wells()
     assert synergy_interactive_map.compact_grid(df) == [["0"] * 12 for _ in range(8)]
 
     saved = synergy_interactive_map.save_compact_grid(df, tmp_path / "synergy_map.csv")

@@ -14,9 +14,14 @@ from pathlib import Path
 
 import pandas as pd
 
+from cellpyability.toolbox import (
+    COLUMNS,
+    ROWS,
+    build_plate_dataframe,
+    plate_wells,
+    split_well,
+)
 
-INNER_ROWS = ["A", "B", "C", "D", "E", "F", "G", "H"]
-INNER_COLUMNS = [str(i) for i in range(1, 13)]
 PLATE_MAP_COLUMNS = [
     "well",
     "row",
@@ -34,39 +39,26 @@ PLATE_MAP_COLUMNS = [
 ]
 
 
-def inner_wells() -> list[str]:
-    """Return supported 96-well plate coordinates in plate order."""
-    return [f"{row}{column}" for row in INNER_ROWS for column in INNER_COLUMNS]
-
-
-def split_well(well: str) -> tuple[str, str]:
-    """Split a well like B2 into row and column labels."""
-    return well[0], well[1:]
-
-
 def blank_plate_map() -> pd.DataFrame:
     """Create an empty plate map DataFrame in the canonical CSV schema."""
-    rows = []
-    for well in inner_wells():
-        row, column = split_well(well)
-        rows.append(
-            {
-                "well": well,
-                "row": row,
-                "column": int(column),
-                "genotype": "",
-                "treatment_type": "",
-                "drug": "",
-                "gradient_id": "",
-                "gradient_axis": "",
-                "concentration_index": "",
-                "replicate_group": "",
-                "replicate_index": "",
-                "is_vehicle": False,
-                "notes": "",
-            }
-        )
-    return pd.DataFrame(rows, columns=PLATE_MAP_COLUMNS)
+    return build_plate_dataframe(
+        PLATE_MAP_COLUMNS,
+        lambda well, row, column: {
+            "well": well,
+            "row": row,
+            "column": int(column),
+            "genotype": "",
+            "treatment_type": "",
+            "drug": "",
+            "gradient_id": "",
+            "gradient_axis": "",
+            "concentration_index": "",
+            "replicate_group": "",
+            "replicate_index": "",
+            "is_vehicle": False,
+            "notes": "",
+        },
+    )
 
 
 def default_gda_plate_map(
@@ -97,7 +89,7 @@ def add_replicate_indices(df: pd.DataFrame) -> pd.DataFrame:
     grouped = df[df["replicate_group"].astype(str).str.len() > 0].groupby("replicate_group", sort=False)
     for _, group in grouped:
         for replicate_idx, row_idx in enumerate(group.index, start=1):
-            df.at[row_idx, "replicate_index"] = replicate_idx
+            df.at[row_idx, "replicate_index"] = str(replicate_idx)
     return df
 
 
@@ -132,8 +124,8 @@ def compact_plate_map_to_long(compact_df: pd.DataFrame) -> pd.DataFrame:
     vehicle_pattern = re.compile(r"^g([12])v$")
     gradient_pattern = re.compile(r"^g([12])d([1-5])c([1-9])$")
 
-    for row_idx, plate_row in enumerate(INNER_ROWS):
-        for col_idx, plate_column in enumerate(INNER_COLUMNS):
+    for row_idx, plate_row in enumerate(ROWS):
+        for col_idx, plate_column in enumerate(COLUMNS):
             raw_code = str(compact_df.iat[row_idx, col_idx]).strip().lower()
             well = f"{plate_row}{plate_column}"
             record = {
@@ -210,7 +202,7 @@ def validate_plate_map(df: pd.DataFrame) -> None:
         raise ValueError(f"Plate map is missing required columns: {', '.join(missing)}")
 
     wells = df["well"].astype(str).tolist()
-    expected_wells = inner_wells()
+    expected_wells = plate_wells()
     if sorted(wells) != sorted(expected_wells):
         raise ValueError("Plate map must contain exactly the 96 wells A-H and 1-12.")
 
@@ -256,36 +248,13 @@ def launch_plate_map_matplotlib(output_csv: str | Path | None = None) -> None:
         "pattern": (0.19, 0.25, 0.33, 0.26),
         "pattern_icon": (0.19, 0.25, 0.33, 0.55),
     }
-    rows = [chr(ord("A") + idx) for idx in range(8)]
-    columns = [str(idx) for idx in range(1, 13)]
+    rows = ROWS
+    columns = COLUMNS
     output_base = Path(output_csv).expanduser() if output_csv else Path.cwd() / "plate_map.csv"
     output_dir = output_base.parent if output_base.suffix.lower() == ".csv" else output_base
     initial_layout_name = output_base.stem if output_base.suffix.lower() == ".csv" else "plate_map"
 
-    def blank_map() -> pd.DataFrame:
-        records = []
-        for row in rows:
-            for column in columns:
-                records.append(
-                    {
-                        "well": f"{row}{column}",
-                        "row": row,
-                        "column": int(column),
-                        "genotype": "",
-                        "treatment_type": "",
-                        "drug": "",
-                        "gradient_id": "",
-                        "gradient_axis": "",
-                        "concentration_index": "",
-                        "replicate_group": "",
-                        "replicate_index": "",
-                        "is_vehicle": False,
-                        "notes": "",
-                    }
-                )
-        return pd.DataFrame(records, columns=PLATE_MAP_COLUMNS)
-
-    data = {"df": blank_map()}
+    data = {"df": blank_plate_map()}
     selected_wells: set[str] = set()
     state = {
         "dragging": False,
@@ -300,6 +269,7 @@ def launch_plate_map_matplotlib(output_csv: str | Path | None = None) -> None:
     }
     controls: dict[str, object] = {}
 
+    # GUI layout/setup god
     fig = plt.figure(figsize=(14, 8), facecolor=colors["background"])
     fig.canvas.manager.set_window_title("CellPyAbility Plate Map")
     plate_ax = fig.add_axes([0.34, 0.17, 0.62, 0.72], facecolor=colors["panel"])
@@ -322,14 +292,17 @@ def launch_plate_map_matplotlib(output_csv: str | Path | None = None) -> None:
     )
 
     def set_status(message: str) -> None:
+        """Update the GUI status message."""
         status_text.set_text(message)
         fig.canvas.draw_idle()
 
     def set_detail(message: str) -> None:
+        """Update the GUI hover/detail message."""
         detail_text.set_text(message)
         fig.canvas.draw_idle()
 
     def make_textbox(y: float, label: str, initial: str) -> TextBox:
+        """Create a left-panel text input widget."""
         ax = fig.add_axes([0.105, y, 0.19, 0.035], facecolor=colors["panel"])
         ax.format_coord = lambda x, y: ""
         return TextBox(ax, label, initial=initial, color=colors["panel"], hovercolor="#eef3f8")
@@ -354,20 +327,25 @@ def launch_plate_map_matplotlib(output_csv: str | Path | None = None) -> None:
     save_ax = fig.add_axes([0.105, 0.07, 0.19, 0.04])
 
     def textbox_value(key: str) -> str:
+        """Return stripped text from a stored TextBox control."""
         return controls[key].text.strip()
 
     def row_df_index(well: str) -> int:
+        """Return the DataFrame row index for one well."""
         df = data["df"]
         return int(df.index[df["well"] == well][0])
 
     def get_row(well: str) -> pd.Series:
+        """Return the plate-map DataFrame row for one well."""
         return data["df"][data["df"]["well"] == well].iloc[0]
 
     def enabled_well(well: str) -> bool:
+        """Return whether a well belongs to the editable plate grid."""
         row, column = split_well(well)
         return row in rows and column in columns
 
     def drug_labels() -> list[str]:
+        """Build the active Drug1..DrugN labels from the drug-count control."""
         try:
             count = int(float(textbox_value("drug_count") or state["drug_count"]))
         except ValueError:
@@ -380,6 +358,7 @@ def launch_plate_map_matplotlib(output_csv: str | Path | None = None) -> None:
         return labels
 
     def drug_pattern(value: object) -> str:
+        """Return the hatch pattern used to visually distinguish drugs."""
         text = str(value or "").strip()
         return {
             "Drug1": "..",
@@ -390,12 +369,14 @@ def launch_plate_map_matplotlib(output_csv: str | Path | None = None) -> None:
         }.get(text, "")
 
     def select_drug(label: str) -> None:
+        """Store the selected drug and refresh the status text."""
         state["selected_drug"] = label
         direction = str(state["gradient_axis"]).capitalize()
         reverse = "reverse" if state["reverse"] else "forward"
         set_status(f"{label} selected: {direction}, {reverse}.")
 
     def refresh_drug_toggles(text: str | None = None) -> None:
+        """Rebuild the drug radio buttons after the drug count changes."""
         for axis in controls.get("drug_axes", []):
             axis.remove()
         labels = drug_labels()
@@ -444,10 +425,12 @@ def launch_plate_map_matplotlib(output_csv: str | Path | None = None) -> None:
         controls["drug_count"].on_text_change(refresh_drug_toggles)
 
     def set_direction(choice: str) -> None:
+        """Update whether new gradients are assigned horizontally or vertically."""
         state["gradient_axis"] = "vertical" if choice.startswith("Vertical") else "horizontal"
         select_drug(str(state["selected_drug"]))
 
     def set_reverse(_choice: str) -> None:
+        """Toggle whether concentration indices increase in reverse order."""
         state["reverse"] = not state["reverse"]
         select_drug(str(state["selected_drug"]))
 
@@ -455,6 +438,7 @@ def launch_plate_map_matplotlib(output_csv: str | Path | None = None) -> None:
     reverse_check.on_clicked(set_reverse)
 
     def blend_hex(start: str, end: str, amount: float) -> str:
+        """Blend two hex colors for gradient-dose shading."""
         amount = max(0.0, min(1.0, amount))
         start_rgb = tuple(int(start[i : i + 2], 16) for i in (1, 3, 5))
         end_rgb = tuple(int(end[i : i + 2], 16) for i in (1, 3, 5))
@@ -462,6 +446,7 @@ def launch_plate_map_matplotlib(output_csv: str | Path | None = None) -> None:
         return "#{:02x}{:02x}{:02x}".format(*rgb)
 
     def genotype_code(value: object) -> str:
+        """Convert a genotype label into the compact CSV code prefix."""
         if value == "Genotype 1":
             return "g1"
         if value == "Genotype 2":
@@ -469,6 +454,7 @@ def launch_plate_map_matplotlib(output_csv: str | Path | None = None) -> None:
         return "UN"
 
     def drug_code(value: object) -> str:
+        """Convert a drug label into the compact CSV drug code."""
         text = str(value or "").strip()
         if not text or text == "Vehicle":
             return "UN"
@@ -480,10 +466,12 @@ def launch_plate_map_matplotlib(output_csv: str | Path | None = None) -> None:
         return f"d{digits}" if digits else "UN"
 
     def concentration_code(value: object) -> str:
+        """Convert a concentration index into the compact CSV concentration code."""
         text = str(value or "").strip()
         return f"c{text}" if text.isdigit() else "UN"
 
     def well_codes(well: str) -> dict[str, str]:
+        """Return compact-code components for one well."""
         row = get_row(well)
         g_code = genotype_code(row["genotype"])
         d_code = drug_code(row["drug"])
@@ -500,28 +488,33 @@ def launch_plate_map_matplotlib(output_csv: str | Path | None = None) -> None:
         return {"g": g_code, "d": d_code, "c": c_code, "v": v_code, "compact": compact}
 
     def compact_csv_value(well: str) -> str:
+        """Return the compact CSV cell value for one well."""
         codes = well_codes(well)
         return codes["compact"] if codes["compact"] != "UN" else "0"
 
     def hover_detail(well: str | None) -> str:
+        """Build the hover text shown in the detail panel."""
         if well is None:
             return "Hover over a well for details."
         codes = well_codes(well)
         return f"{well} | g: {codes['g']} | d: {codes['d']} | c: {codes['c']} | v: {codes['v']}"
 
     def well_text(well: str) -> str:
+        """Build the text drawn inside one well cell."""
         codes = well_codes(well)
         if codes["compact"] not in {"0", "UN"}:
             return f"{well}\n{codes['compact']}"
         return well
 
     def well_pattern(well: str) -> str:
+        """Return the hatch pattern drawn over one well cell."""
         row = get_row(well)
         if row["drug"] == "Vehicle":
             return ""
         return drug_pattern(row["drug"])
 
     def gradient_amount(row: pd.Series) -> float:
+        """Calculate relative color intensity for a drug-gradient well."""
         try:
             concentration = int(row["concentration_index"])
         except (TypeError, ValueError):
@@ -540,6 +533,7 @@ def launch_plate_map_matplotlib(output_csv: str | Path | None = None) -> None:
         return ((concentration - 1) / (max_concentration - 1)) * 0.82
 
     def well_color(well: str) -> str:
+        """Choose the fill color for one well cell."""
         if well in selected_wells:
             return colors["active"]
         row = get_row(well)
@@ -570,9 +564,11 @@ def launch_plate_map_matplotlib(output_csv: str | Path | None = None) -> None:
         return colors["unassigned"]
 
     def row_index(row: str) -> int:
+        """Return the display index for a plate row letter."""
         return rows.index(row)
 
     def ordered_wells(wells: list[str], axis: str, reverse: bool = False) -> list[str]:
+        """Order selected wells for concentration assignment."""
         ordered = sorted(wells, key=lambda well: (row_index(well[0]), int(well[1:])))
         if axis == "horizontal":
             ordered = sorted(ordered, key=lambda well: (int(well[1:]), row_index(well[0])))
@@ -581,6 +577,7 @@ def launch_plate_map_matplotlib(output_csv: str | Path | None = None) -> None:
         return ordered
 
     def concentration_indices(wells: list[str], axis: str, reverse: bool = False) -> dict[str, int]:
+        """Assign concentration indices across selected wells."""
         if axis == "horizontal":
             ordered_columns = sorted({int(well[1:]) for well in wells}, reverse=reverse)
             lookup = {str(column): idx for idx, column in enumerate(ordered_columns, start=1)}
@@ -590,6 +587,7 @@ def launch_plate_map_matplotlib(output_csv: str | Path | None = None) -> None:
         return {well: lookup[well[0]] for well in wells}
 
     def well_from_event(event) -> str | None:
+        """Convert a Matplotlib mouse event into a well ID."""
         if event.inaxes is not plate_ax or event.xdata is None or event.ydata is None:
             return None
         col_idx = int(event.xdata)
@@ -599,6 +597,7 @@ def launch_plate_map_matplotlib(output_csv: str | Path | None = None) -> None:
         return None
 
     def wells_in_rectangle(start: tuple[float, float], end: tuple[float, float]) -> set[str]:
+        """Return wells touched by the drag-selection rectangle."""
         x1, y1 = start
         x2, y2 = end
         xmin, xmax = sorted([x1, x2])
@@ -613,6 +612,7 @@ def launch_plate_map_matplotlib(output_csv: str | Path | None = None) -> None:
         return hits
 
     def redraw_plate() -> None:
+        """Redraw the plate grid from the current DataFrame and selection."""
         plate_ax.clear()
         plate_ax.format_coord = lambda x, y: ""
         plate_ax.set_xlim(-0.7, len(columns))
@@ -668,6 +668,7 @@ def launch_plate_map_matplotlib(output_csv: str | Path | None = None) -> None:
         fig.canvas.draw_idle()
 
     def draw_marquee(start: tuple[float, float], end: tuple[float, float]) -> None:
+        """Draw the translucent drag-selection rectangle."""
         if state["marquee"] is not None:
             state["marquee"].remove()
         x1, y1 = start
@@ -686,6 +687,7 @@ def launch_plate_map_matplotlib(output_csv: str | Path | None = None) -> None:
         fig.canvas.draw_idle()
 
     def set_wells(wells: list[str], **values: object) -> None:
+        """Set one or more DataFrame columns for selected wells."""
         df = data["df"]
         for well in wells:
             idx = row_df_index(well)
@@ -693,6 +695,7 @@ def launch_plate_map_matplotlib(output_csv: str | Path | None = None) -> None:
                 df.at[idx, key] = value
 
     def set_vehicle(wells: list[str]) -> None:
+        """Mark selected wells as vehicle controls in the DataFrame."""
         df = data["df"]
         for well in wells:
             idx = row_df_index(well)
@@ -706,6 +709,7 @@ def launch_plate_map_matplotlib(output_csv: str | Path | None = None) -> None:
             df.at[idx, "is_vehicle"] = True
 
     def set_gradient(wells: list[str]) -> None:
+        """Mark selected wells as a drug gradient in the DataFrame."""
         df = data["df"]
         drug = str(state["selected_drug"])
         axis = str(state["gradient_axis"])
@@ -727,6 +731,7 @@ def launch_plate_map_matplotlib(output_csv: str | Path | None = None) -> None:
             df.at[idx, "is_vehicle"] = False
 
     def clear_wells(wells: list[str]) -> None:
+        """Clear assignment columns for selected wells."""
         df = data["df"]
         for well in wells:
             idx = row_df_index(well)
@@ -735,6 +740,7 @@ def launch_plate_map_matplotlib(output_csv: str | Path | None = None) -> None:
                     df.at[idx, column] = False if column == "is_vehicle" else ""
 
     def apply_selection(mode: str):
+        """Apply the chosen assignment mode to highlighted wells."""
         if not selected_wells:
             set_status("Highlight one or more wells first.")
             return
@@ -756,11 +762,12 @@ def launch_plate_map_matplotlib(output_csv: str | Path | None = None) -> None:
         redraw_plate()
 
     def reset_all(event=None) -> None:
+        """Reset every well after a confirmation click."""
         if not state["confirm_reset"]:
             state["confirm_reset"] = True
             set_status("Click Reset All again to confirm clearing every well.")
             return
-        data["df"] = blank_map()
+        data["df"] = blank_plate_map()
         selected_wells.clear()
         state["confirm_reset"] = False
         set_detail("Hover over a well for details.")
@@ -768,11 +775,13 @@ def launch_plate_map_matplotlib(output_csv: str | Path | None = None) -> None:
         redraw_plate()
 
     def sanitized_layout_name() -> str:
+        """Return a filesystem-safe layout name from the text input."""
         name = textbox_value("layout_name") or "plate_map"
         cleaned = "".join(character if character.isalnum() or character in {"-", "_"} else "_" for character in name).strip("_")
         return cleaned or "plate_map"
 
     def save_layout(event=None) -> None:
+        """Write the current map as a compact 8x12 CSV."""
         output_dir.mkdir(parents=True, exist_ok=True)
         path = (output_dir / f"{sanitized_layout_name()}.csv").expanduser().resolve()
         with path.open("w", newline="") as handle:
@@ -782,6 +791,7 @@ def launch_plate_map_matplotlib(output_csv: str | Path | None = None) -> None:
         set_status(f"Saved layout to {path}")
 
     def on_press(event) -> None:
+        """Start click or drag selection on the plate grid."""
         well = well_from_event(event)
         if well is None:
             return
@@ -791,6 +801,7 @@ def launch_plate_map_matplotlib(output_csv: str | Path | None = None) -> None:
         state["drag_end"] = (event.xdata, event.ydata)
 
     def on_motion(event) -> None:
+        """Update hover text or drag marquee while the mouse moves."""
         if event.inaxes is not plate_ax or event.xdata is None or event.ydata is None:
             if not state["dragging"]:
                 set_detail(hover_detail(None))
@@ -802,6 +813,7 @@ def launch_plate_map_matplotlib(output_csv: str | Path | None = None) -> None:
         draw_marquee(state["drag_start"], state["drag_end"])
 
     def on_release(event) -> None:
+        """Finish click or drag selection and update highlighted wells."""
         if not state["dragging"]:
             return
         state["dragging"] = False
@@ -859,7 +871,7 @@ def launch_plate_map_gui(output_csv: str | Path | None = None) -> None:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Create or validate a CellPyAbility plate map CSV.")
     parser.add_argument("--output", help="Path for the plate map CSV created by the GUI or template.")
-    parser.add_argument("--default", action="store_true", help="Write the current default GDA-style plate map without opening the GUI.")
+    parser.add_argument("--default", action="store_true", help="Write the current default GDA-style plate map without opening the GUI.")# This is for if the user decides they want to make their own plate map csv
     parser.add_argument("--validate", help="Validate an existing plate map CSV and exit.")
     args = parser.parse_args(argv)
 
