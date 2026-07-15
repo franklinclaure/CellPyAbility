@@ -1,16 +1,33 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from pathlib import Path
+
+
+APP_DIR = Path(SPECPATH).resolve()
+REPO_ROOT = APP_DIR.parent
+SRC_DIR = REPO_ROOT / 'src'
+
 
 a = Analysis(
-    ['CellPyAbilityGUI.py'],
-    pathex=['.', '../../src'],
+    [str(APP_DIR / 'CellPyAbilityGUI.py')],
+    pathex=[str(APP_DIR), str(SRC_DIR)],
     binaries=[],
     datas=[
-    ('CellPyAbilityLogo.png', '.'),
-    ('CellPyAbilityIcon.ico', '.'),
-    ('CellPyAbility.cppipe', '.'),
+        (str(APP_DIR / 'CellPyAbilityLogo.png'), '.'),
+        (str(APP_DIR / 'Potential_New_Logo.png'), '.'),
+        (str(APP_DIR / 'CellPyAbilityIcon.ico'), '.'),
+        (str(APP_DIR / 'CellPyAbility.cppipe'), '.'),
     ],
-    hiddenimports=['cellpyability', 'cellpyability.toolbox', 'cellpyability.gda_analysis', 'cellpyability.synergy_analysis', 'cellpyability.simple_analysis'],
+    hiddenimports=[
+        'cellpyability',
+        'cellpyability.toolbox',
+        'cellpyability.cli',
+        'cellpyability.gda_analysis',
+        'cellpyability.synergy_analysis',
+        'cellpyability.simple_analysis',
+        'cellpyability.GDA_interactive_map',
+        'cellpyability.synergy_interactive_map',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -36,7 +53,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='CellPyAbilityIcon.ico'
+    icon=str(APP_DIR / 'CellPyAbilityIcon.ico')
 )
 coll = COLLECT(
     exe,
