@@ -84,7 +84,7 @@ For command information while in the CLI, run `cellpyability --help` or `cellpya
 
 Standalone executable applications are available for macOS and Windows. 
 
-📥 **[Download the latest release here](https://github.com/bindralab/cellpyability/releases/latest)**
+📥 **[Download the latest release here](https://github.com/franklinclaure/CellPyAbility/releases/tag/v2.0.0)**
 
 Navigate to the bottom of the release notes and download the `.zip` file for your respective operating system.
 
@@ -323,30 +323,44 @@ cellpyability batch --input-file path/to/config.csv --no-plot
 - `-o, --output-dir`: (Optional) Custom output directory
 
 **Config CSV Schema:**
-The configuration file should contain a `module` column to specify the analysis type (`gda` or `synergy`), followed by the required parameters for that module.
+The configuration file should contain a `module` column to specify the analysis type (`gda` or `synergy`), followed by the required parameters for that module. The provided `config.csv` is intentionally minimal; add optional columns only when a row needs them.
 
-| Column | Description |
-| --- | --- |
-| `module` | `gda` or `synergy` |
-| `dir` | Directory containing images |
-| `title` | Experiment title |
-| `upper` | (GDA) Name for cell condition in rows B-D |
-| `lower` | (GDA) Name for cell condition in rows E-G |
-| `plate_map` | (GDA) Optional plate map CSV for custom genotype, vehicle, gradient, and replicate assignments |
-| `drug_name1` | (GDA plate-map) Name for drug 1 |
-| `top_conc1` | (GDA) Top concentration in molar for standard GDA or drug 1 |
-| `dilution1` | (GDA) Dilution factor for standard GDA or drug 1 |
-| `drug_name2`-`drug_name5` | (GDA plate-map) Optional Names for drugs 2-5 |
-| `top_conc2`-`top_conc5` | (GDA plate-map) Optional Top concentrations in molar for drugs 2-5 |
-| `dilution2`-`dilution5` | (GDA plate-map) Optional Dilution factors for drugs 2-5 |
-| `xdrug` | (Synergy) Name of horizontal gradient drug |
-| `xconc` | (Synergy) Horizontal top concentration |
-| `xdil` | (Synergy) Horizontal dilution factor |
-| `ydrug` | (Synergy) Name of vertical gradient drug |
-| `yconc` | (Synergy) Vertical top concentration |
-| `ydil` | (Synergy) Vertical dilution factor |
+**CSV Key:**
+Describes the required/accepted inputs for each module
+- 🟢 Required for GDAs without plate map
+- 🔴 Required for Synergy(with or without platemap)
+- 🔵 Required for GDAs with a plate map
+- 🟣 Needed for every row
 
-Note: You can leave columns blank if they do not apply to the specific module for that row.
+| Column | Key | Description |
+| --- | --- | ---|
+| `module` | 🟣 |`gda` or `synergy` |
+| `dir` | 🟣 | Directory containing images |
+| `title` | 🟣 | Experiment title |
+| `upper` | 🟢 | (GDA) Name for cell condition in rows B-D |
+| `lower` | 🟢 | (GDA) Name for cell condition in rows E-G |
+| `top_conc1` | 🟢🔵 | (GDA) Top concentration in molar for standard GDA or drug 1 |
+| `dilution1` | 🟢🔵 | (GDA) Dilution factor for standard GDA or drug 1 |
+| `xdrug` | 🔴 | (Synergy) Name of horizontal gradient drug |
+| `xconc` | 🔴 | (Synergy) Horizontal top concentration |
+| `xdil` | 🔴 | (Synergy) Horizontal dilution factor |
+| `ydrug` | 🔴 | (Synergy) Name of vertical gradient drug |
+| `yconc` | 🔴 | (Synergy) Vertical top concentration |
+| `ydil` | 🔴 | (Synergy) Vertical dilution factor |
+
+GDA plate-map columns can be added right after "lower" as needed:
+
+| Column | Key | Description |
+| --- | --- | --- |
+| `plate_map_dir` |  | Plate map CSV for custom genotype, vehicle, gradient, and replicate assignments |
+| `genotype_1_name` | 🔵 | Display name for `g1` plate-map wells |
+| `genotype_2_name` | 🔵 | Display name for `g2` plate-map wells |
+| `drug_name1` | 🔵 | Name for drug 1 |
+| `drug_name2`-`drug_name5` | 🔵 | Names for additional drugs 2-5 |
+| `top_conc2`-`top_conc5` | 🔵 | Top concentrations in molar for additional drugs 2-5 |
+| `dilution2`-`dilution5` | 🔵 | Dilution factors for additional drugs 2-5 |
+
+Note: You can leave columns blank if they do not apply to the specific module for that row. Optional columns do not need to be included in the CSV header **unless at least one row uses them**.
 
 ### Output Locations
 
@@ -431,7 +445,7 @@ The source code for the GUI applications can be found in the [app_source](./app_
 ## Example Outputs
 
 ### Plate Map
-The plate map module allows you to utilize CellPyAbility beyond the traditonal experimental formats for gda and synergy analyses. Note: Traditional experimental setups are still accepted by the Plate Map.
+The plate map module allows you to utilize CellPyAbility beyond the traditonal experimental formats for GDA and synergy analyses. Note: Traditional experimental setups are still accepted by the Plate Map.
 
 
 - [GDA Plate Map](example/v2_example_expected_outputs/test_gda_PlateMap.png)
@@ -461,9 +475,9 @@ The synergy module outputs tabular files for viability, fitted values, synergy s
 
 - [fitted viability matrix](example/v2_example_expected_outputs/test_synergy_FittedViabilityMatrix.csv)
 
-- [Bliss synergy matrix](example/v1_example_expected_outputs/test_synergy_BlissMatrix.csv)
+- [bliss synergy matrix](example/v1_example_expected_outputs/test_synergy_BlissMatrix.csv)
 
-- [fitted Bliss matrix](example/v2_example_expected_outputs/test_synergy_FittedBlissMatrix.csv)
+- [fitted bliss matrix](example/v2_example_expected_outputs/test_synergy_FittedBlissMatrix.csv)
 
 - [fitted logistic model parameters](example/v2_example_expected_outputs/test_synergy_fitted_params.csv)
 

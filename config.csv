@@ -1,3 +1,4 @@
-module,dir,title,upper,lower,plate_map,drug_name1,top_conc1,dilution1,drug_name2,top_conc2,dilution2,drug_name3,top_conc3,dilution3,drug_name4,top_conc4,dilution4,drug_name5,top_conc5,dilution5,xdrug,xconc,xdil,ydrug,yconc,ydil
-gda,example/example_gda,20260101_GDA,Cell Line A,Cell Line B,,Drug_A,0.000001,3,,,,,,,,,,,,,,,,,,
-synergy,example/example_synergy,20260101_Synergy,,,,,,,,,,,,,,,,,,,Drug_A,0.0004,4,Drug_B,0.0001,4
+module,dir,title,upper,lower,plate_map,genotype_1_name,genotype_2_name,drug_name1,top_conc1,dilution1,xdrug,xconc,xdil,ydrug,yconc,ydil
+gda,example/example_gda,20260101_GDA,Cell Line A,Cell Line B,,,,,0.000001,3,,,,,,
+synergy,example/example_synergy,20260101_Synergy,,,,,,,,,Drug_A,0.0004,4,Drug_B,0.0001,4
+gda,example/example_gda,20260101_GDA_PlateMap,,,example/example_PlateMap_csv/original_gda_layout.csv,Cell Line A,Cell Line B,Drug_A,0.000001,3,,,,,,

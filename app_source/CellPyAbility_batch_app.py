@@ -1,4 +1,4 @@
-"""Windows GUI wrapper for batch analysis using shared CLI backend logic."""
+"""Windows GUI wrapper for batch analysis using shared backend logic."""
 
 import sys
 import tkinter as tk
@@ -6,7 +6,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 import CellPyAbility_toolbox_app as tb_gui
-from cellpyability import cli
+from cellpyability import batch_analysis
 from cellpyability.toolbox import logger
 
 
@@ -15,17 +15,6 @@ def run():
         root = tk.Tk()
         root.title('Batch input')
         config_csv = ''
-        plate_map_file = ''
-
-        def select_plate_map():
-            nonlocal plate_map_file
-            selected = filedialog.askopenfilename(
-                title="Select Plate Map CSV",
-                filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
-            )
-            if selected:
-                plate_map_file = selected
-                plate_map_label.config(text=Path(selected).name)
 
         def select_config_csv():
             nonlocal config_csv
@@ -39,10 +28,6 @@ def run():
 
         def submit():
             root.destroy()
-
-        ttk.Button(root, text='Upload a Plate Map', command=select_plate_map).pack()
-        plate_map_label = ttk.Label(root, text='No plate map selected')
-        plate_map_label.pack()
 
         ttk.Button(root, text='Select Batch Configuration CSV', command=select_config_csv).pack()
         config_label = ttk.Label(root, text='No batch CSV selected')
@@ -58,12 +43,14 @@ def run():
         return
 
     output_base = tb_gui.configure_cli_backend()
-    logger.debug('Configured shared CLI backend for Batch GUI run.')
+    logger.debug('Configured shared batch backend for Batch GUI run.')
 
     try:
-        # Re-use the existing batch logic from cli.py
-        # show_plot=True to match the user's preference for popups
-        cli.run_batch(config_csv, show_plot=True, output_dir=str(output_base))
+        batch_analysis.run_batch(
+            input_file=config_csv,
+            show_plot=True,
+            output_dir=str(output_base),
+        )
         messagebox.showinfo("Batch Complete", "All experiments in the batch have been processed.")
     except Exception as e:
         logger.error(f"Batch analysis failed: {e}")

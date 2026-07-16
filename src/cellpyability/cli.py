@@ -11,11 +11,10 @@ This module provides CLI commands to run the three main modules:
 """
 
 import argparse
-import csv
 import sys
 
 from ._version import __version__
-from .toolbox import CellPyAbilityError
+from .toolbox import CellPyAbilityError, build_gda_drug_params
 
 
 def create_parser():
@@ -282,44 +281,6 @@ def create_parser():
     return parser
 
 
-def build_gda_drug_params(plate_map_file, number_of_drugs, get_drug_name, get_top_conc, get_dilution):
-    """Build plate-map GDA drug parameter dictionaries from caller-provided inputs."""
-    from cellpyability import GDA_interactive_map
-
-    plate_map = GDA_interactive_map.load_plate_map(plate_map_file)
-    gradient_rows = plate_map[
-        plate_map['treatment_type'].astype(str).eq('drug_gradient')
-    ]
-
-    drug_params = []
-    for drug_number in range(1, number_of_drugs + 1):
-        drug_name = get_drug_name(drug_number)
-        drug_top_conc = get_top_conc(drug_number)
-        drug_dilution = get_dilution(drug_number)
-        missing = []
-        if not drug_name:
-            missing.append('--drug-name' if drug_number == 1 else f'--drug-name-{drug_number}')
-        if drug_top_conc is None:
-            missing.append('--top-conc' if drug_number == 1 else f'--top-conc-{drug_number}')
-        if drug_dilution is None:
-            missing.append('--dilution' if drug_number == 1 else f'--dilution-{drug_number}')
-        if missing:
-            raise ValueError(f"Missing required plate-map drug argument(s): {', '.join(missing)}")
-
-        drug_rows = gradient_rows[
-            gradient_rows['drug'].astype(str).str.strip() == f'd{drug_number}'
-        ]
-        drug_params.append({
-            'drug_number': drug_number,
-            'drug_name': drug_name,
-            'top_conc': drug_top_conc,
-            'dilution': drug_dilution,
-            'max_index': int(drug_rows['concentration_index'].astype(int).max()),
-        })
-
-    return drug_params
-
-
 def run_gda(args):
     """Run the GDA module with CLI arguments."""
     if not getattr(args, 'plate_map', None) and (not args.upper_name or not args.lower_name):
@@ -455,102 +416,14 @@ def run_synergy_map(args):
 
 
 def run_batch(args):
-    """Run batch processing from a CSV file."""
-    from cellpyability import gda_analysis, synergy_analysis
+    """Run the batch module with CLI arguments."""
+    from cellpyability import batch_analysis
 
-    output_dir = getattr(args, 'output_dir', None)
-    no_plot = getattr(args, 'no_plot', False)
-
-    try:
-        with open(args.input_file, 'r', encoding='utf-8-sig') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                module = row.get('module', '').strip().lower()
-                title = row.get('title')
-                image_dir = row.get('dir') or row.get('image_dir')
-
-                if not module:
-                    print(f"Skipping row with no module specified: {row}")
-                    continue
-
-                if module == 'gda':
-                    print(f"\n--- Running GDA: {title} ---")
-                    plate_map_file = row.get('plate_map') or row.get('plate_map_file') or None 
-                    # original parameters renamed with fallback to original naming system
-                    top_conc = row.get('top_conc1') or row.get('top_conc') or row.get('conc') 
-                    dilution = row.get('dilution1') or row.get('dilution') or row.get('dil')
-                    drug_params = None
-                    genotype_names = None
-                    #Reading the plate map to determine the number of drugs
-                    if plate_map_file:
-                        from cellpyability import GDA_interactive_map
-
-                        plate_map = GDA_interactive_map.load_plate_map(plate_map_file) #Makes interpreted dataframe of plate map 
-                        gradient_rows = plate_map[
-                            plate_map['treatment_type'].astype(str).eq('drug_gradient')
-                        ]
-                        drug_codes = gradient_rows['drug'].astype(str).str.strip()
-                        number_of_drugs = drug_codes[drug_codes.str.len().gt(0)].nunique()
-                        if number_of_drugs > 5:
-                            raise ValueError(f"Plate map contains {number_of_drugs} drugs, but batch GDA supports up to 5.")
-
-                        def row_float(key, *fallbacks):
-                            value = row.get(key)
-                            for fallback in fallbacks:
-                                value = value or row.get(fallback)
-                            return float(value) if value else None
-                        
-                        # Makes multiple dictionaries of top conc, dilution, and drug name for each drug so that you can get dose intervals.
-                        drug_params = build_gda_drug_params(
-                            plate_map_file,
-                            number_of_drugs,
-                            lambda drug_number: row.get(f'drug_name{drug_number}'),
-                            lambda drug_number: row_float(f'top_conc{drug_number}', *(['top_conc', 'conc'] if drug_number == 1 else [])),
-                            lambda drug_number: row_float(f'dilution{drug_number}', *(['dilution', 'dil'] if drug_number == 1 else [])),
-                        )
-                        genotype_names = {
-                            genotype_code: genotype_name
-                            for genotype_code, genotype_name in (
-                                ('g1', row.get('genotype_1_name')),
-                                ('g2', row.get('genotype_2_name')),
-                            )
-                            if genotype_name
-                        }
-
-                    gda_analysis.run_gda(
-                        title_name=title,
-                        upper_name=row.get('upper') or row.get('upper_name'),
-                        lower_name=row.get('lower') or row.get('lower_name'),
-                        top_conc=float(top_conc),
-                        dilution=float(dilution),
-                        image_dir=image_dir,
-                        show_plot=not no_plot,
-                        output_dir=output_dir,
-                        plate_map_file=plate_map_file,
-                        drug_params=drug_params,
-                        genotype_names=genotype_names,
-                    )
-                elif module == 'synergy':
-                    print(f"\n--- Running Synergy: {title} ---")
-                    synergy_analysis.run_synergy(
-                        title_name=title,
-                        x_drug=row.get('xdrug') or row.get('x_drug'),
-                        x_top_conc=float(row.get('xconc') or row.get('x_top_conc')),
-                        x_dilution=float(row.get('xdil') or row.get('x_dilution')),
-                        y_drug=row.get('ydrug') or row.get('y_drug'),
-                        y_top_conc=float(row.get('yconc') or row.get('y_top_conc')),
-                        y_dilution=float(row.get('ydil') or row.get('y_dilution')),
-                        image_dir=image_dir,
-                        show_plot=not no_plot,
-                        output_dir=output_dir
-                    )
-                else:
-                    print(f"Unknown module '{module}' in row: {row}")
-
-    except FileNotFoundError:
-        raise CellPyAbilityError(f"Batch input file not found: {args.input_file}")
-    except Exception as e:
-        raise CellPyAbilityError(f"Error during batch processing: {e}")
+    batch_analysis.run_batch(
+        input_file=args.input_file,
+        show_plot=not args.no_plot,
+        output_dir=getattr(args, 'output_dir', None),
+    )
 
 
 def main():

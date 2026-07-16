@@ -6,6 +6,7 @@ For more information, please see the README at https://github.com/bindralab/Cell
 
 import logging
 import os
+import platform
 import re
 import subprocess
 import sys
@@ -68,6 +69,44 @@ def build_plate_dataframe(
     return pd.DataFrame(records, columns=columns)
 
 
+def build_gda_drug_params(plate_map_file, number_of_drugs, get_drug_name, get_top_conc, get_dilution):
+    """Build plate-map GDA drug parameter dictionaries from caller-provided inputs."""
+    from cellpyability import GDA_interactive_map
+
+    plate_map = GDA_interactive_map.load_plate_map(plate_map_file)
+    gradient_rows = plate_map[
+        plate_map['treatment_type'].astype(str).eq('drug_gradient')
+    ]
+
+    drug_params = []
+    for drug_number in range(1, number_of_drugs + 1):
+        drug_name = get_drug_name(drug_number)
+        drug_top_conc = get_top_conc(drug_number)
+        drug_dilution = get_dilution(drug_number)
+        missing = []
+        if not drug_name:
+            missing.append('--drug-name' if drug_number == 1 else f'--drug-name-{drug_number}')
+        if drug_top_conc is None:
+            missing.append('--top-conc' if drug_number == 1 else f'--top-conc-{drug_number}')
+        if drug_dilution is None:
+            missing.append('--dilution' if drug_number == 1 else f'--dilution-{drug_number}')
+        if missing:
+            raise ValueError(f"Missing required plate-map drug argument(s): {', '.join(missing)}")
+
+        drug_rows = gradient_rows[
+            gradient_rows['drug'].astype(str).str.strip() == f'd{drug_number}'
+        ]
+        drug_params.append({
+            'drug_number': drug_number,
+            'drug_name': drug_name,
+            'top_conc': drug_top_conc,
+            'dilution': drug_dilution,
+            'max_index': int(drug_rows['concentration_index'].astype(int).max()),
+        })
+
+    return drug_params
+
+
 def prepare_interactive_matplotlib_backend() -> None:
     """Ensure Matplotlib can open the interactive plate-map editor window."""
     if os.environ.get("MPLBACKEND", "").lower() == "agg":
@@ -77,13 +116,20 @@ def prepare_interactive_matplotlib_backend() -> None:
 
     backend = matplotlib.get_backend().lower()
     if backend in {"agg", "pdf", "ps", "svg", "template"} or backend.endswith("backend_agg"):
-        try:
-            matplotlib.use("TkAgg", force=True)
-        except Exception as error:
-            raise RuntimeError(
-                "The plate-map editor needs an interactive Matplotlib backend. "
-                "Unset MPLBACKEND=Agg or install Tk support for Matplotlib."
-            ) from error
+        preferred_backends = ["MacOSX", "TkAgg"] if platform.system() == "Darwin" else ["TkAgg"]
+        backend_errors = []
+        for preferred_backend in preferred_backends:
+            try:
+                matplotlib.use(preferred_backend, force=True)
+                return
+            except Exception as error:
+                backend_errors.append(f"{preferred_backend}: {error}")
+
+        raise RuntimeError(
+            "The plate-map editor needs an interactive Matplotlib backend. "
+            "Unset MPLBACKEND=Agg or install Tk support for Matplotlib. "
+            f"Tried: {'; '.join(backend_errors)}"
+        )
 
 
 
