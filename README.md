@@ -91,7 +91,7 @@ Navigate to the bottom of the release notes and download the `.zip` file for you
 ### Test Data
 - Download the [example GDA images](https://github.com/bindralab/CellPyAbility/tree/main/example/example_gda)
 - Download the [example synergy images](https://github.com/bindralab/CellPyAbility/tree/main/example/example_synergy)
-- Compare outputs to [expected outputs](https://github.com/bindralab/CellPyAbility/tree/main/example/v1_example_expected_outputs)
+- Compare outputs to [expected outputs](https://github.com/bindralab/CellPyAbility/tree/main/example/v2_example_expected_outputs)
 
 ## Abstract
 
@@ -385,29 +385,6 @@ Navigate to the bottom of the release notes and download the `.zip` file for you
 
 After opening the .zip files, the CellPyAbility application can be run.
 
-### Building the Windows Application from Source
-
-Build the Windows executable on a Windows computer. From PowerShell:
-
-```powershell
-git clone https://github.com/bindralab/CellPyAbility
-cd CellPyAbility
-
-py -3.11 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --upgrade pip
-.\.venv\Scripts\python.exe -m pip install -e ".[exe]"
-
-.\.venv\Scripts\python.exe -m PyInstaller app_source\CellPyAbility.spec --clean --noconfirm
-```
-
-The build output is:
-
-```powershell
-dist\CellPyAbility\CellPyAbility.exe
-```
-
-Zip and distribute the entire `dist\CellPyAbility\` folder, not only the `.exe` file.
-
 **Note for macOS users**
 
 Because this application is an open-source tool and not signed via the paid Apple Developer program, macOS Gatekeeper will automatically quarantine the downloaded `.zip` file.
@@ -582,13 +559,13 @@ For manual verification, the `example/` directory contains real experimental dat
 
 3. **Compare Your Results:**
    - Your outputs in `src/cellpyability/gda_output/`
-   - Expected outputs in `example/v1_example_expected_outputs/`
+   - Expected outputs in `example/v2_example_expected_outputs/`
    - [Test parameters](example/example_params.txt) used to generate examples
 
 **Available Example Datasets:**
 - [GDA test data](example/example_gda/): 60 well images for dose-response analysis
 - [Synergy test data](example/example_synergy/): 180 well images for drug combination analysis
-- [Expected outputs](example/v1_example_expected_outputs/): Reference results for validation
+- [Expected outputs](example/v2_example_expected_outputs/): Reference results for validation
 
 This dual approach ensures both automated validation (for development/CI) and manual verification (to confirm your specific environment is working correctly).
 
