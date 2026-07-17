@@ -385,6 +385,29 @@ Navigate to the bottom of the release notes and download the `.zip` file for you
 
 After opening the .zip files, the CellPyAbility application can be run.
 
+### Building the Windows Application from Source
+
+Build the Windows executable on a Windows computer. From PowerShell:
+
+```powershell
+git clone https://github.com/bindralab/CellPyAbility
+cd CellPyAbility
+
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -e ".[exe]"
+
+.\.venv\Scripts\python.exe -m PyInstaller app_source\CellPyAbility.spec --clean --noconfirm
+```
+
+The build output is:
+
+```powershell
+dist\CellPyAbility\CellPyAbility.exe
+```
+
+Zip and distribute the entire `dist\CellPyAbility\` folder, not only the `.exe` file.
+
 **Note for macOS users**
 
 Because this application is an open-source tool and not signed via the paid Apple Developer program, macOS Gatekeeper will automatically quarantine the downloaded `.zip` file.
