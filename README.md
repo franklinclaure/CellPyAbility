@@ -84,7 +84,7 @@ For command information while in the CLI, run `cellpyability --help` or `cellpya
 
 Standalone executable applications are available for macOS and Windows. 
 
-📥 **[Download the latest release here](https://github.com/franklinclaure/CellPyAbility/releases/tag/v2.0.0)**
+📥 **[Download the latest release here](https://github.com/franklinclaure/CellPyAbility/releases/latest)**
 
 Navigate to the bottom of the release notes and download the `.zip` file for your respective operating system.
 
@@ -379,7 +379,7 @@ This ensures the package works correctly whether installed via PyPI or in develo
 ## Running the Code-Free Application
 Running the code-free application requires no programming experience, Python environment, or dependencies. It contains all three modules with graphical user interfaces (GUIs) for user inputs.
 
-📥 **[Download the latest release here](https://github.com/bindralab/cellpyability/releases/latest)**
+📥 **[Download the latest release here](https://github.com/franklinclaure/CellPyAbility/releases/latest)**
 
 Navigate to the bottom of the release notes and download the `.zip` file for your respective operating system.
 
