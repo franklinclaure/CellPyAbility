@@ -8,14 +8,24 @@ via nuclei counting. It provides three modules:
 - simple: raw nuclei count matrix in 96-well format
 """
 
-__version__ = "0.1.0"
+from ._version import __version__
 __author__ = "James Elia"
 __email__ = "james.elia@yale.edu"
 
-# Import analysis modules for programmatic access
-from . import toolbox
-from . import gda_analysis
-from . import synergy_analysis
-from . import simple_analysis
+__all__ = [
+    'toolbox',
+    'gda_analysis',
+    'synergy_analysis',
+    'simple_analysis',
+    'batch_analysis',
+    'GDA_interactive_map',
+]
 
-__all__ = ['toolbox', 'gda_analysis', 'synergy_analysis', 'simple_analysis']
+
+def __getattr__(name):
+    """Lazy-load submodules so lightweight commands do not import plotting stacks."""
+    if name in __all__:
+        from importlib import import_module
+
+        return import_module(f'.{name}', __name__)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

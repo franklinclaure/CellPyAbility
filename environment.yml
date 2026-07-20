@@ -3,10 +3,11 @@ channels:
   - conda-forge
 dependencies:
   - python=3.11
-  - matplotlib
-  - numpy
-  - pandas
-  - scipy
-  - plotly
+  - matplotlib>=3.5.0,<4.0.0
+  - numpy>=1.24.4,<2.0.0
+  - pandas>=2.0.0,<3.0.0
+  - scipy>=1.10.0,<2.0.0
+  - plotly>=5.0.0,<6.0.0
   - tk          # for tkinter
+  - pillow>=9.0.0,<13.0.0      # for the animated GUI logo transition
   - pip

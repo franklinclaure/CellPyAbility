@@ -6,20 +6,142 @@ For more information, please see the README at https://github.com/bindralab/Cell
 
 import logging
 import os
+import platform
 import re
 import subprocess
+import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import numpy as np
 from scipy.optimize import curve_fit
+from scipy.stats import f as f_distribution
 import shutil
+
+
+class CellPyAbilityError(Exception):
+    """Base exception for CellPyAbility."""
+
+
+class ConfigurationError(CellPyAbilityError):
+    """Raised when required configuration is missing or invalid."""
+
+
+class InputValidationError(CellPyAbilityError):
+    """Raised when user-provided inputs are invalid."""
+
+
+class CellProfilerExecutionError(CellPyAbilityError):
+    """Raised when CellProfiler subprocess execution fails."""
+
+
+class DataValidationError(CellPyAbilityError):
+    """Raised when expected data format/columns are not present."""
+
+#Making an empty 96 Well Plate that can be imported to both the GDA Plate Map and Synergy Plate Map
+
+ROWS = ["A", "B", "C", "D", "E", "F", "G", "H"]
+COLUMNS = [str(column) for column in range(1, 13)]
+
+
+def plate_wells() -> list[str]:
+    """Return supported 96-well plate coordinates in plate order so that a user-made csv map can be verified"""
+    return [f"{row}{column}" for row in ROWS for column in COLUMNS]
+
+
+def split_well(well: str) -> tuple[str, str]:
+    """Split a well like A12 into row and column labels that are added to the plate map df """
+    return well[0], well[1:]
+
+
+def build_plate_dataframe(
+    columns: list[str],
+    record_factory: Callable[[str, str, str], dict[str, Any]],
+) -> pd.DataFrame:
+    """Build a 96-well DataFrame using workflow-specific row contents."""
+    records = [
+        record_factory(f"{row}{column}", row, column)
+        for row in ROWS
+        for column in COLUMNS
+    ]
+    return pd.DataFrame(records, columns=columns)
+
+
+def build_gda_drug_params(plate_map_file, number_of_drugs, get_drug_name, get_top_conc, get_dilution):
+    """Build plate-map GDA drug parameter dictionaries from caller-provided inputs."""
+    from cellpyability import GDA_interactive_map
+
+    plate_map = GDA_interactive_map.load_plate_map(plate_map_file)
+    gradient_rows = plate_map[
+        plate_map['treatment_type'].astype(str).eq('drug_gradient')
+    ]
+
+    drug_params = []
+    for drug_number in range(1, number_of_drugs + 1):
+        drug_name = get_drug_name(drug_number)
+        drug_top_conc = get_top_conc(drug_number)
+        drug_dilution = get_dilution(drug_number)
+        missing = []
+        if not drug_name:
+            missing.append('--drug-name' if drug_number == 1 else f'--drug-name-{drug_number}')
+        if drug_top_conc is None:
+            missing.append('--top-conc' if drug_number == 1 else f'--top-conc-{drug_number}')
+        if drug_dilution is None:
+            missing.append('--dilution' if drug_number == 1 else f'--dilution-{drug_number}')
+        if missing:
+            raise ValueError(f"Missing required plate-map drug argument(s): {', '.join(missing)}")
+
+        drug_rows = gradient_rows[
+            gradient_rows['drug'].astype(str).str.strip() == f'd{drug_number}'
+        ]
+        drug_params.append({
+            'drug_number': drug_number,
+            'drug_name': drug_name,
+            'top_conc': drug_top_conc,
+            'dilution': drug_dilution,
+            'max_index': int(drug_rows['concentration_index'].astype(int).max()),
+        })
+
+    return drug_params
+
+
+def prepare_interactive_matplotlib_backend() -> None:
+    """Ensure Matplotlib can open the interactive plate-map editor window."""
+    if os.environ.get("MPLBACKEND", "").lower() == "agg":
+        os.environ.pop("MPLBACKEND", None)
+
+    import matplotlib
+
+    backend = matplotlib.get_backend().lower()
+    if backend in {"agg", "pdf", "ps", "svg", "template"} or backend.endswith("backend_agg"):
+        preferred_backends = ["MacOSX", "TkAgg"] if platform.system() == "Darwin" else ["TkAgg"]
+        backend_errors = []
+        for preferred_backend in preferred_backends:
+            try:
+                matplotlib.use(preferred_backend, force=True)
+                return
+            except Exception as error:
+                backend_errors.append(f"{preferred_backend}: {error}")
+
+        raise RuntimeError(
+            "The plate-map editor needs an interactive Matplotlib backend. "
+            "Unset MPLBACKEND=Agg or install Tk support for Matplotlib. "
+            f"Tried: {'; '.join(backend_errors)}"
+        )
+
+
+
+
 
 def cellpyability_logger():
     """
     Creates and configures the CellPyAbility logger.
     
-    Logs all messages (DEBUG and above) to cellpyability.log in current working directory.
+    Logs all messages (DEBUG and above) to cellpyability.log.
+    In frozen mode (Windows .exe), logs to the directory containing the executable.
+    In script mode, logs to the current working directory.
     Logs INFO and above to console output.
     
     Returns:
@@ -34,10 +156,24 @@ def cellpyability_logger():
     if logger.hasHandlers():
         return logger
 
-    # Create a cellpyability.log file in current working directory (PyPI-compatible)
-    log_file = Path.cwd() / "cellpyability.log"
-    fh = logging.FileHandler(log_file)
-    fh.setLevel(logging.DEBUG)
+    # Determine log file path
+    if getattr(sys, 'frozen', False):
+        # Bundled executable - log in the same directory as the .exe
+        log_dir = Path(sys.executable).resolve().parent
+    else:
+        # Script mode - log in current working directory
+        log_dir = Path.cwd()
+        
+    log_file = log_dir / "cellpyability.log"
+    
+    try:
+        fh = logging.FileHandler(log_file)
+        fh.setLevel(logging.DEBUG)
+    except (PermissionError, IOError):
+        # Fallback to current working directory if executable dir is not writable
+        log_file = Path.cwd() / "cellpyability.log"
+        fh = logging.FileHandler(log_file)
+        fh.setLevel(logging.DEBUG)
 
     # Only log >= INFO messages in the terminal
     ch = logging.StreamHandler()
@@ -52,27 +188,43 @@ def cellpyability_logger():
     logger.addHandler(fh)
     logger.addHandler(ch)
 
-    logger.debug('Logger setup complete.')
+    logger.debug(f'Logger setup complete. Logging to: {log_file}')
     return logger
 
 # Define logger so it can be referenced in later functions
 logger = cellpyability_logger()
 
-# Establishes the base directory for package resources (read-only)
-# Use get_output_base_dir() for writable output directories
+# Establishes the base directory for persistent configuration (writable)
 def establish_base():
-    """Get the package installation directory (for reading resources like .cppipe files)."""
-    base_dir = Path(__file__).resolve().parent
+    """
+    Get the base directory for configuration and persistent state.
+    In frozen mode (Windows .exe), this is the directory containing the executable.
+    In script mode, this is the package directory.
+    """
+    if getattr(sys, 'frozen', False):
+        # Bundled executable - use the directory containing the .exe
+        return Path(sys.executable).resolve().parent
     
-    if not base_dir.exists():
-        logger.critical(f'Package directory {base_dir} does not exist.')
-        exit(1)
-    
-    logger.info(f'Package directory {base_dir} established ...')
-    return base_dir
+    # Script mode - use the package directory
+    return Path(__file__).resolve().parent
 
-# Define base_dir for package resources (pipeline files, etc.)
+# Define base_dir for configuration files (cellprofiler_path.txt, etc.)
 base_dir = establish_base()
+
+def get_resource_path(relative_path):
+    """
+    Get the absolute path to a package resource.
+    Supports both development (script) mode and frozen (PyInstaller) mode.
+    """
+    if getattr(sys, 'frozen', False):
+        # PyInstaller extraction folder
+        base_path = Path(getattr(sys, '_MEIPASS', sys.executable))
+    else:
+        # Package source directory
+        base_path = Path(__file__).resolve().parent
+        
+    resource_path = base_path / relative_path
+    return resource_path.resolve()
 
 def get_output_base_dir(output_dir=None):
     """
@@ -97,7 +249,7 @@ def get_output_base_dir(output_dir=None):
     # Verify it's writable
     if not os.access(output_base, os.W_OK):
         logger.critical(f'Output directory {output_base} is not writable.')
-        exit(1)
+        raise ConfigurationError(f'Output directory {output_base} is not writable.')
     
     logger.info(f'Output directory {output_base} established ...')
     return output_base
@@ -121,11 +273,43 @@ def prompt_path():
     """
     Prompt user to enter the CellProfiler executable path.
     
+    In GUI/frozen mode, uses a tkinter file dialog.
+    In CLI mode, uses a terminal prompt.
+    
     Returns:
     --------
     str
         User-provided path with quotes and whitespace stripped
     """
+    if getattr(sys, 'frozen', False):
+        import tkinter as tk
+        from tkinter import filedialog, simpledialog
+        
+        # Create a hidden root window
+        root = tk.Tk()
+        root.withdraw()
+        logger.debug('Hidden tkinter window created for path prompt')
+
+        # Prompt the user to pick the CellProfiler executable via a file dialog
+        path = filedialog.askopenfilename(
+            title="Select your CellProfiler executable",
+            filetypes=[("Executables", "*.exe" if os.name == "nt" else "*"), ("All files", "*.*")]
+        )
+
+        # If they hit “Cancel” (empty string), fall back to a simple text prompt
+        if not path:
+            path = simpledialog.askstring(
+                title="Enter CellProfiler Path",
+                prompt="Could not pick a file. Please type the full path to CellProfiler:"
+            )
+
+        root.destroy()
+        if path:
+            return path.strip().strip('"').strip("'")
+        else:
+            logger.critical('No CellProfiler path provided in GUI prompt')
+            raise ConfigurationError('No path provided for CellProfiler executable')
+
     return input("Enter the path to the CellProfiler program: ").strip().strip('"').strip("'")
 
 def get_cellprofiler_path():
@@ -141,8 +325,19 @@ def get_cellprofiler_path():
     str or Path
         Path to the CellProfiler executable
     """
-    # Store CellProfiler path in current working directory
-    config_file = Path.cwd() / "cellprofiler_path.txt"
+    env_cp_path = os.getenv("CELLPYABILITY_CP_PATH")
+    if env_cp_path:
+        env_cp_path = Path(env_cp_path).expanduser().resolve()
+        if env_cp_path.exists():
+            logger.debug(f"Using CellProfiler path from CELLPYABILITY_CP_PATH: {env_cp_path}")
+            return str(env_cp_path)
+        raise ConfigurationError(
+            f"CELLPYABILITY_CP_PATH is set but does not exist: {env_cp_path}"
+        )
+
+    config_dir = Path(os.getenv("CELLPYABILITY_CONFIG_DIR", str(Path.cwd()))).expanduser().resolve()
+    config_dir.mkdir(parents=True, exist_ok=True)
+    config_file = config_dir / "cellprofiler_path.txt"
 
     if config_file.exists():
         with open(config_file, "r") as file:
@@ -191,7 +386,7 @@ def get_cellprofiler_path():
 cp_path = None
 
 def _ensure_cellprofiler_path():
-    """Ensure CellProfiler path is set, calling get_cellprofiler_path if needed."""
+    """Ensure CellProfiler path is set when no counts file was provided by user"""
     global cp_path
     if cp_path is None:
         cp_path = get_cellprofiler_path()
@@ -214,6 +409,13 @@ def gen_dose_range(dose_max: float, dilution: float, num_doses: int) -> np.ndarr
     -----------
     dose_array : NumPy array
     """
+    if dose_max <= 0:
+        raise InputValidationError("Top concentration must be greater than 0.")
+    if dilution <= 1:
+        raise InputValidationError("Dilution factor must be greater than 1.")
+    if num_doses < 1:
+        raise InputValidationError("Number of doses must be at least 1.")
+
     # Calculate lowest dose directly to avoid accumulating error from float division
     dose_min = dose_max / (dilution ** (num_doses-1))
 
@@ -256,19 +458,26 @@ def run_cellprofiler(image_dir, counts_file=None, output_dir=None):
         counts_path = Path(counts_file).resolve()
         if not counts_path.exists():
             logger.critical(f'Counts file {counts_file} does not exist.')
-            exit(1)
+            raise InputValidationError(f'Counts file {counts_file} does not exist.')
         logger.info(f'Using pre-existing counts file: {counts_file}')
         df_cp = pd.read_csv(counts_path)
         return df_cp, counts_path
     
     # Define the path to the CellProfiler pipeline (.cppipe) in the package directory
-    cppipe_path = base_dir / 'CellPyAbility.cppipe'
-    if cppipe_path.exists():
-        logger.debug('CellProfiler pipeline exists in package directory ...')
+    pipeline_env = os.getenv("CELLPYABILITY_PIPELINE_PATH")
+    if pipeline_env:
+        cppipe_path = Path(pipeline_env).expanduser().resolve()
     else:
-        logger.critical('CellProfiler pipeline CellPyAbility.cppipe not found in package directory.')
-        logger.info('If you are using a different pipeline, make sure it is named CellPyAbility.cppipe and is in the package directory.')
-        exit(1)
+        # Use helper to find it in bundle or package
+        cppipe_path = get_resource_path('CellPyAbility.cppipe')
+
+    if cppipe_path.exists():
+        logger.debug(f'CellProfiler pipeline found at: {cppipe_path}')
+    else:
+        logger.critical(f'CellProfiler pipeline not found: {cppipe_path}')
+        raise ConfigurationError(
+            f'CellProfiler pipeline CellPyAbility.cppipe not found at {cppipe_path}'
+        )
 
     ## Define the folder where CellProfiler will output the .csv results
     # Use the output directory structure for writable files
@@ -283,11 +492,17 @@ def run_cellprofiler(image_dir, counts_file=None, output_dir=None):
     
     if not image_path_obj.exists():
         logger.critical(f"Image directory does not exist: {image_path_obj}")
-        exit(1)
+        raise InputValidationError(f"Image directory does not exist: {image_path_obj}")
         
     # We also ensure the pipeline path and output dir are absolute resolved paths
     cppipe_path_obj = cppipe_path.resolve()
     cp_output_obj = cp_output_dir.resolve()
+    cp_csv = cp_output_dir / 'CellPyAbilityImage.csv'
+
+    # Prevent stale output reuse across failed runs
+    if cp_csv.exists():
+        cp_csv.unlink()
+        logger.debug(f'Removed existing stale CellProfiler output: {cp_csv}')
 
     # Run CellProfiler from the command line
     logger.debug('Starting CellProfiler from command line ...')
@@ -295,23 +510,86 @@ def run_cellprofiler(image_dir, counts_file=None, output_dir=None):
     
     # We explicitly convert paths to str() here
     # Subprocess command receives clean string paths formatted for host OS
-    subprocess.run([
-        cp_exe, 
-        '-c', '-r', 
-        '-p', str(cppipe_path_obj), 
-        '-i', str(image_path_obj), 
+    command = [
+        cp_exe,
+        '-c', '-r',
+        '-p', str(cppipe_path_obj),
+        '-i', str(image_path_obj),
         '-o', str(cp_output_obj)
-    ])
+    ]
+    
+    # Pre-calculate total images for progress bar
+    image_extensions = {'.tif', '.tiff', '.png', '.jpg', '.jpeg'}
+    total_images = sum(
+        1
+        for f in image_path_obj.rglob("*")
+        if f.is_file() and f.suffix.lower() in image_extensions
+    )
+    if total_images == 0:
+        logger.warning(f"No image files found in {image_path_obj}. CellProfiler may not have anything to process.")
+        total_images = 1 # Prevent division by zero if it runs anyway
+
+    logger.info("Starting image analysis. This may take a moment...")
+    
+    try:
+        # Use Popen to stream output live
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            universal_newlines=True
+        )
+        
+        last_reported_image = 0
+        
+        for line in process.stdout:
+            # Look for lines like "Thu Jun 11 15:11:12 2026: Image # 1, module Images # 1"
+            match = re.search(r"Image\s+#\s+(\d+),\s+module", line)
+            if match:
+                current = int(match.group(1))
+                
+                # Only update the progress bar if we've moved to a new image
+                if current > last_reported_image:
+                    last_reported_image = current
+                    # Calculate progress
+                    percent = int(100 * current / total_images)
+                    bar_length = 30
+                    filled = int(bar_length * current / total_images)
+                    bar = '█' * filled + '-' * (bar_length - filled)
+                    # Use carriage return \r to stay on the same line
+                    sys.stdout.write(f'\rCellProfiler Progress: |{bar}| {percent}% ({current}/{total_images})')
+                    sys.stdout.flush()
+        
+        # Move to the next line after the progress bar finishes
+        if last_reported_image > 0:
+            sys.stdout.write('\n')
+            
+        process.wait()
+        if process.returncode != 0:
+            logger.error(f'CellProfiler execution failed with return code {process.returncode}.')
+            raise CellProfilerExecutionError(
+                f"CellProfiler failed (exit code {process.returncode}). Please check the console output for details."
+            )
+            
+    except Exception as e:
+        if not isinstance(e, CellProfilerExecutionError):
+            logger.error(f"Failed to run CellProfiler: {e}")
+            raise CellProfilerExecutionError("Failed to run CellProfiler.") from e
+        raise
+
     logger.info('CellProfiler nuclei counting complete.')
 
     # Define the path to the CellProfiler counting output
-    cp_csv = cp_output_dir / 'CellPyAbilityImage.csv'
     if cp_csv.exists():
         logger.debug('CellPyAbilityImage.csv exists in /cp_output/ ...')
     else:
         logger.critical('CellProfiler output CellPyAbilityImage.csv does not exist in /cp_output/')
         logger.info('If CellPyAbility.cppipe is modified, make sure the output is still named CellPyAbilityImage.csv')
-        exit(1)
+        raise CellProfilerExecutionError(
+            'CellProfiler completed but expected output CellPyAbilityImage.csv was not created.'
+        )
 
     # Load the CellProfiler counts into a DataFrame
     df_cp = pd.read_csv(cp_csv)
@@ -332,6 +610,78 @@ def rename_wells(tiff_name):
         return f"{row}{col}"
         
     return tiff_name
+
+
+def standardize_counts_dataframe(df_cp):
+    """
+    Standardize CellProfiler counts data to ['nuclei', 'well'].
+    
+    Verifies that the required data is present and attempts to map various
+    possible CellProfiler output column names to a standard format.
+    
+    Raises:
+    -------
+    DataValidationError
+        If the required columns cannot be found or the dataframe is empty.
+    """
+    if df_cp.empty:
+        raise DataValidationError("The provided counts data is empty.")
+
+    columns = list(df_cp.columns)
+    
+    # If already standardized, return a copy of the required columns
+    if {'nuclei', 'well'}.issubset(columns):
+        return df_cp[['nuclei', 'well']].copy()
+
+    # Identify count column
+    count_candidates = ['Count_nuclei', 'count_nuclei', 'Nuclei', 'nuclei']
+    count_col = next((c for c in count_candidates if c in columns), None)
+    
+    # Identify well/filename column
+    well_candidates = ['FileName_DAPI', 'FileName_DNA', 'FileName', 'well', 'FileName_images']
+    well_col = next((c for c in well_candidates if c in columns), None)
+
+    # Heuristics for missing columns
+    if count_col is None or well_col is None:
+        non_image_cols = [c for c in columns if c != 'ImageNumber']
+        
+        # Inference for count column
+        if count_col is None:
+            numeric_cols = [
+                c for c in non_image_cols if pd.api.types.is_numeric_dtype(df_cp[c])
+            ]
+            if numeric_cols:
+                count_col = numeric_cols[0]
+                logger.warning(
+                    f"Count column not found by name. Inferred '{count_col}' as nuclei count column."
+                )
+
+        # Inference for well column
+        if well_col is None:
+            remaining = [c for c in non_image_cols if c != count_col]
+            if remaining:
+                well_col = remaining[0]
+                logger.warning(
+                    f"Well/FileName column not found by name. Inferred '{well_col}' as well identifier."
+                )
+
+    if count_col is None or well_col is None:
+        raise DataValidationError(
+            f"Could not identify required columns in counts file. Found: {columns}. "
+            "Expected columns like 'Count_Nuclei' and 'FileName_DAPI'."
+        )
+
+    # Standardize and copy
+    standardized = df_cp[[count_col, well_col]].copy()
+    standardized.columns = ['nuclei', 'well']
+
+    # Final validation of contents
+    if standardized['nuclei'].isna().any():
+        raise DataValidationError('Nuclei count column contains missing values.')
+    if standardized['well'].isna().any():
+        raise DataValidationError('Well identifier column contains missing values.')
+
+    return standardized
 
 def rename_counts(cp_csv, counts_csv):
     """
@@ -362,20 +712,20 @@ def rename_counts(cp_csv, counts_csv):
 # Define models at module level so they are accessible
 def fivePL(x, A, B, C, D, G):
     """
-    Five-parameter logistic (5PL) dose-response model.
+    Five-parameter logistic (5PL) survival-response model.
     
     Parameters:
     -----------
     x : array-like
         Dose/concentration values
     A : float
-        Minimum asymptote (response at infinite dose)
+        Upper response asymptote
     B : float
         Hill slope
     C : float
         Inflection point (IC50/EC50)
     D : float
-        Maximum asymptote (response at zero dose)
+        Lower response asymptote
     G : float
         Asymmetry factor
     
@@ -386,82 +736,192 @@ def fivePL(x, A, B, C, D, G):
     """
     return ((A - D) / (1.0 + (x / C) ** B) ** G) + D
 
-def hill(x, Emax, EC50, HillSlope):
-    """
-    Hill equation for dose-response curves.
-    
-    Parameters:
-    -----------
-    x : array-like
-        Dose/concentration values
-    Emax : float
-        Maximum effect
-    EC50 : float
-        Half-maximal effective concentration
-    HillSlope : float
-        Hill coefficient (slope factor)
-    
-    Returns:
-    --------
-    array-like
-        Predicted response values
-    """
-    return Emax * (x**HillSlope) / (EC50**HillSlope + x**HillSlope)
 
-def fit_response_curve(x, y, name):
-    """
-    Fits 5PL, falls back to Hill, returns (x_plot, y_plot, IC50, params).
-    Solves for IC50 algebraically. Returns NaN if IC50 is unsolvable.
-    Input x and y should be numpy arrays.
-    """
-    # Create smooth x-axis for plotting
-    x_plot = np.logspace(np.log10(min(x[x > 0])), np.log10(max(x)), 1000)
+def fourPL(x, A, B, C, D):
+    """Four-parameter logistic survival-response model."""
+    return fivePL(x, A, B, C, D, 1.0)
 
-    # Initial Guesses (Heuristic)
+
+def _logistic_ic50(A, B, C, D, G):
+    """Solve for the concentration where the fitted response equals 0.5."""
+    try:
+        term = (A - D) / (0.5 - D)
+        root_term = (term ** (1 / G)) - 1
+        if term <= 0 or root_term <= 0:
+            raise ValueError("IC50 undefined (curve doesn't cross 0.5)")
+        return C * root_term ** (1 / B)
+    except (ValueError, ArithmeticError, FloatingPointError, ZeroDivisionError):
+        return np.nan
+
+
+def fit_response_models(x, y, name, alpha=0.05):
+    """Fit bounded 4PL and 5PL models and select one using a nested F test."""
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    valid = np.isfinite(x) & np.isfinite(y) & (x > 0)
+    x = x[valid]
+    y = y[valid]
+
+    if len(x) == 0:
+        logger.warning(f"Could not fit {name}. No finite positive dose points.")
+        return None
+
+    order = np.argsort(x)
+    x = x[order]
+    y = y[order]
+    if len(x) < 4:
+        logger.warning(f"Could not fit {name}. Need at least 4 valid points.")
+        return None
+
+    x_plot = np.logspace(np.log10(np.min(x)), np.log10(np.max(x)), 1000)
     y_max = np.max(y)
     y_min = np.min(y)
-    
-    # Find x closest to half-maximal response for initial C/EC50 guess
-    # We clip 0.5 to be between min and max to avoid indexing errors
     target_y = (y_max + y_min) / 2
-    idx = (np.abs(y - target_y)).argmin()
-    c_guess = x[idx]
-    
-    # [A (max), B (slope), C (inflection), D (min), G (asymmetry)]
-    p0_5PL = [y_max, 1.0, c_guess, y_min, 1.0] 
-    
-    # [Emax, EC50, HillSlope]
-    p0_Hill = [y_max, c_guess, 1.0]
+    c_guess = x[np.abs(y - target_y).argmin()]
+
+    five_fit = None
+    four_fit = None
+
+    if len(x) >= 5:
+        try:
+            p0_5pl = [y_max, 1.0, c_guess, y_min, 1.0]
+            popt_5pl, _, five_info, _, _ = curve_fit(
+                fivePL,
+                x,
+                y,
+                p0=p0_5pl,
+                bounds=(
+                    [1e-18, .1, 1e-18, 1e-18, 0.1],
+                    [2, 10, 1, 2, 10.0],
+                ),
+                method="trf",
+                maxfev=5000,
+                full_output=True,
+            )
+            A, B, C, D, G = popt_5pl
+            observed_fit = fivePL(x, *popt_5pl)
+            five_fit = {
+                "params": {
+                    "Max": A,
+                    "Infl.": C,
+                    "Min": D,
+                    "Slope": B,
+                    "Asym": G,
+                    "IC50": _logistic_ic50(A, B, C, D, G),
+                },
+                "RSS": float(np.sum((y - observed_fit) ** 2)),
+                "Iterations": int(five_info["nfev"]),
+                "x_fit": x_plot,
+                "y_fit": fivePL(x_plot, *popt_5pl),
+            }
+        except (RuntimeError, ValueError, TypeError, ArithmeticError, OverflowError):
+            logger.warning(f"Could not fit {name} with 5PL.")
 
     try:
-        # Try 5PL
-        popt, _ = curve_fit(fivePL, x, y, p0=p0_5PL, maxfev=5000)
-        
-        # Algebraic IC50 for 5PL
-        A, B, C, D, G = popt
-        
-        # Check domain validity for IC50 (must be able to take roots)
-        # We need the term inside the root to be positive
-        try:
-             term = (A - D) / (0.5 - D)
-             if term <= 0:
-                 raise ValueError("IC50 undefined (curve doesn't cross 0.5)")
-             
-             # Solve for x where y = 0.5
-             ic50 = C * ((term**(1/G)) - 1)**(1/B)
-        except (ValueError, ArithmeticError):
-             ic50 = np.nan
+        p0_4pl = [y_max, 1.0, c_guess, y_min]
+        popt_4pl, _, four_info, _, _ = curve_fit(
+            fourPL,
+            x,
+            y,
+            p0=p0_4pl,
+            bounds=(
+                [1e-18, .1, 1e-18, 1e-18],
+                [2, 10, 1, 2],
+            ),
+            method="trf",
+            maxfev=5000,
+            full_output=True,
+        )
+        A, B, C, D = popt_4pl
+        observed_fit = fourPL(x, *popt_4pl)
+        four_fit = {
+            "params": {
+                "Max": A,
+                "Infl.": C,
+                "Min": D,
+                "Slope": B,
+                "IC50": _logistic_ic50(A, B, C, D, 1.0),
+            },
+            "RSS": float(np.sum((y - observed_fit) ** 2)),
+            "Iterations": int(four_info["nfev"]),
+            "x_fit": x_plot,
+            "y_fit": fourPL(x_plot, *popt_4pl),
+        }
+    except (RuntimeError, ValueError, TypeError, ArithmeticError, OverflowError):
+        logger.warning(f"Could not fit {name} with 4PL.")
 
-        return x_plot, fivePL(x_plot, *popt), ic50
-        
-    except (RuntimeError, ValueError):
-        # Fallback to Hill
-        try:
-             popt, _ = curve_fit(hill, x, y, p0=p0_Hill, maxfev=10000)
-             # Hill parameter index 1 is EC50
-             ic50 = popt[1] 
-             return x_plot, hill(x_plot, *popt), ic50
-        except:
-             logger.warning(f"Could not fit {name}. Returning connect-the-dots")
-             # Return straight lines between points if fit fails
-             return x, y, np.nan
+    if four_fit is None and five_fit is None:
+        return None
+
+    f_statistic = np.nan
+    p_value = np.nan
+    selected_model = "4PL" if four_fit is not None else "5PL"
+
+
+    #f statistic test to determnine if 5PL error difference (in comparison to the 4PL) is statistically signifant
+    if four_fit is not None and five_fit is not None and len(x) > 5:
+        rss4 = four_fit["RSS"]
+        rss5 = five_fit["RSS"]
+        rss_difference = rss4 - rss5
+        if rss5 == 0:
+            if rss_difference > 0:
+                f_statistic = np.inf
+                p_value = 0.0
+            else:
+                p_value = 1.0
+        else:
+            f_statistic = (rss_difference / 1) / (rss5 / (len(x) - 5))
+            if f_statistic > 0:
+                p_value = float(f_distribution.sf(f_statistic, 1, len(x) - 5))
+            else:
+                p_value = 1.0
+        if np.isfinite(p_value) and p_value < alpha:
+            selected_model = "5PL"
+
+    selected_fit = five_fit if selected_model == "5PL" else four_fit
+    return {
+        "selected_model": selected_model,
+        "selected_fit": selected_fit,
+        "four_pl": four_fit,
+        "five_pl": five_fit,
+        "F Statistic": f_statistic,
+        "F p-value": p_value,
+        "alpha": alpha,
+        "n": len(x),
+    }
+
+
+def fitted_params_table(fitted_param_rows):
+    """Build the selected-fit parameter table from fit_response_models results."""
+    fitted_param_columns = [
+        'Max', 'Infl.', 'Min', 'Slope', 'Asym', 'IC50', 'RSS', 'AUC',
+        'Iterations', '5PL F Statistic', 'p-value',
+    ]
+    rows = []
+    index = []
+
+    for label, comparison in fitted_param_rows:
+        if comparison is None:
+            continue
+        selected_fit = comparison['selected_fit']
+        selected_model = comparison['selected_model']
+        fitted_params = dict(selected_fit['params'])
+        fitted_params.setdefault('Asym', 'NA')
+        fitted_params['RSS'] = selected_fit['RSS']
+        fitted_params['AUC'] = np.trapz(selected_fit['y_fit'], selected_fit['x_fit'])
+        fitted_params['Iterations'] = selected_fit['Iterations']
+
+        f_statistic = comparison['F Statistic']
+        f_value = "NA" if np.isnan(f_statistic) else f"{f_statistic:.6g}"
+        usage = "used" if selected_model == "5PL" else "not used"
+        fitted_params['5PL F Statistic'] = f"{f_value} ({usage})"
+
+        p_value = comparison['F p-value']
+        p_text = "NA" if np.isnan(p_value) else f"{p_value:.6g}"
+        significance = "stat significant" if np.isfinite(p_value) and p_value < comparison['alpha'] else "not stat significant"
+        fitted_params['p-value'] = f"{p_text} ({significance})"
+
+        rows.append(fitted_params)
+        index.append(label)
+
+    return pd.DataFrame(rows, index=index, columns=fitted_param_columns)

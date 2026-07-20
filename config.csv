@@ -1,2 +1,4 @@
-dir,title,upper,lower,conc,dil
-path/to/image_dir/,20260101_CellLineA_DrugX,Cell Line A,Cell Line B,0.000001,3
+module,dir,title,upper,lower,plate_map,genotype_1_name,genotype_2_name,drug_name1,top_conc1,dilution1,xdrug,xconc,xdil,ydrug,yconc,ydil
+gda,example/example_gda,20260101_GDA,Cell Line A,Cell Line B,,,,,0.000001,3,,,,,,
+synergy,example/example_synergy,20260101_Synergy,,,,,,,,,Drug_A,0.0004,4,Drug_B,0.0001,4
+gda,example/example_gda,20260101_GDA_PlateMap,,,example/example_PlateMap_csv/original_gda_layout.csv,Cell Line A,Cell Line B,Drug_A,0.000001,3,,,,,,
